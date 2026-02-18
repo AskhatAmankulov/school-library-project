@@ -37,7 +37,7 @@ $stmt->bind_param("s", $searchTerm);
 $stmt->execute();
 $result = $stmt->get_result();
 
-$members = [];
+$members = []; 
 while ($row = $result->fetch_assoc()) {
     $members[] = $row;
 }
