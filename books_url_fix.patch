@@ -1,0 +1,17 @@
+// Replace lines 460-467 in books.php with:
+
+// Cover source toggle and preview
+document.getElementById('cover_source_upload')?.addEventListener('change', () => {
+    document.getElementById('coverUploadContainer').style.display = '';
+    document.getElementById('coverUrlContainer').style.display = 'none';
+    // Clear URL input when switching to upload
+    document.getElementById('cover_url').value = '';
+});
+document.getElementById('cover_source_url')?.addEventListener('change', () => {
+    document.getElementById('coverUploadContainer').style.display = 'none';
+    document.getElementById('coverUrlContainer').style.display = '';
+    // Clear file input when switching to URL
+    document.getElementById('cover_file').value = '';
+    const coverPrev = document.getElementById('coverPreview');
+    coverPrev.style.display = 'none';
+});

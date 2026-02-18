@@ -1,0 +1,268 @@
+-- Add diverse borrowing records only (books and members already exist)
+-- Recent active borrowings
+INSERT INTO borrowings
+    (member_id, book_id, borrow_date, due_date, status)
+VALUES
+    (6, 17, DATE_SUB(CURDATE(), INTERVAL
+2 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 12 DAY), 'active'),
+(7, 18, DATE_SUB
+(CURDATE
+(), INTERVAL 1 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 13 DAY), 'active'),
+(8, 19, CURDATE
+(), DATE_ADD
+(CURDATE
+(), INTERVAL 14 DAY), 'active'),
+(9, 20, DATE_SUB
+(CURDATE
+(), INTERVAL 4 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 10 DAY), 'active'),
+(10, 21, DATE_SUB
+(CURDATE
+(), INTERVAL 3 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 11 DAY), 'active'),
+(11, 22, DATE_SUB
+(CURDATE
+(), INTERVAL 5 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 9 DAY), 'active'),
+(12, 23, DATE_SUB
+(CURDATE
+(), INTERVAL 1 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 13 DAY), 'active'),
+(13, 24, DATE_SUB
+(CURDATE
+(), INTERVAL 2 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 12 DAY), 'active'),
+(14, 25, DATE_SUB
+(CURDATE
+(), INTERVAL 6 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 8 DAY), 'active'),
+(15, 26, CURDATE
+(), DATE_ADD
+(CURDATE
+(), INTERVAL 14 DAY), 'active'),
+(18, 27, DATE_SUB
+(CURDATE
+(), INTERVAL 3 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 11 DAY), 'active'),
+(19, 28, DATE_SUB
+(CURDATE
+(), INTERVAL 1 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 13 DAY), 'active'),
+(20, 29, DATE_SUB
+(CURDATE
+(), INTERVAL 4 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 10 DAY), 'active'),
+(6, 30, DATE_SUB
+(CURDATE
+(), INTERVAL 2 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 12 DAY), 'active'),
+(7, 31, DATE_SUB
+(CURDATE
+(), INTERVAL 5 DAY), DATE_ADD
+(CURDATE
+(), INTERVAL 9 DAY), 'active');
+
+-- Returned books with history
+INSERT INTO borrowings
+    (member_id, book_id, borrow_date, due_date, return_date, status)
+VALUES
+    (6, 1, DATE_SUB(CURDATE(), INTERVAL
+30 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 16 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 18 DAY), 'returned'),
+(7, 2, DATE_SUB
+(CURDATE
+(), INTERVAL 45 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 31 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 32 DAY), 'returned'),
+(8, 3, DATE_SUB
+(CURDATE
+(), INTERVAL 60 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 46 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 47 DAY), 'returned'),
+(9, 4, DATE_SUB
+(CURDATE
+(), INTERVAL 25 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 11 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 12 DAY), 'returned'),
+(10, 5, DATE_SUB
+(CURDATE
+(), INTERVAL 50 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 36 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 37 DAY), 'returned'),
+(11, 6, DATE_SUB
+(CURDATE
+(), INTERVAL 40 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 26 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 27 DAY), 'returned'),
+(12, 7, DATE_SUB
+(CURDATE
+(), INTERVAL 35 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 21 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 22 DAY), 'returned'),
+(13, 8, DATE_SUB
+(CURDATE
+(), INTERVAL 55 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 41 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 42 DAY), 'returned'),
+(14, 32, DATE_SUB
+(CURDATE
+(), INTERVAL 20 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 6 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 7 DAY), 'returned'),
+(15, 33, DATE_SUB
+(CURDATE
+(), INTERVAL 28 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 14 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 15 DAY), 'returned'),
+(18, 34, DATE_SUB
+(CURDATE
+(), INTERVAL 33 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 19 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 20 DAY), 'returned'),
+(19, 35, DATE_SUB
+(CURDATE
+(), INTERVAL 48 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 34 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 35 DAY), 'returned'),
+(20, 36, DATE_SUB
+(CURDATE
+(), INTERVAL 22 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 8 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 9 DAY), 'returned');
+
+-- Multiple borrowings from same members
+INSERT INTO borrowings
+    (member_id, book_id, borrow_date, due_date, return_date, status)
+VALUES
+    (6, 37, DATE_SUB(CURDATE(), INTERVAL
+90 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 76 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 77 DAY), 'returned'),
+(6, 38, DATE_SUB
+(CURDATE
+(), INTERVAL 75 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 61 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 62 DAY), 'returned'),
+(7, 39, DATE_SUB
+(CURDATE
+(), INTERVAL 80 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 66 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 67 DAY), 'returned'),
+(7, 40, DATE_SUB
+(CURDATE
+(), INTERVAL 65 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 51 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 52 DAY), 'returned'),
+(8, 41, DATE_SUB
+(CURDATE
+(), INTERVAL 70 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 56 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 57 DAY), 'returned'),
+(9, 42, DATE_SUB
+(CURDATE
+(), INTERVAL 85 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 71 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 72 DAY), 'returned'),
+(10, 43, DATE_SUB
+(CURDATE
+(), INTERVAL 95 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 81 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 82 DAY), 'returned'),
+(2, 44, DATE_SUB
+(CURDATE
+(), INTERVAL 100 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 86 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 87 DAY), 'returned'),
+(3, 45, DATE_SUB
+(CURDATE
+(), INTERVAL 110 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 96 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 97 DAY), 'returned');
+
+-- Overdue borrowings (active but past due date)
+INSERT INTO borrowings
+    (member_id, book_id, borrow_date, due_date, status)
+VALUES
+    (5, 46, DATE_SUB(CURDATE(), INTERVAL
+20 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 6 DAY), 'active'),
+(6, 47, DATE_SUB
+(CURDATE
+(), INTERVAL 25 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 11 DAY), 'active'),
+(16, 17, DATE_SUB
+(CURDATE
+(), INTERVAL 18 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 4 DAY), 'active'),
+(17, 18, DATE_SUB
+(CURDATE
+(), INTERVAL 22 DAY), DATE_SUB
+(CURDATE
+(), INTERVAL 8 DAY), 'active');
+
+-- Update available quantities based on active borrowings
+UPDATE books SET available_quantity = quantity - (SELECT COUNT(*)
+FROM borrowings
+WHERE book_id = books.id AND status = 'active');

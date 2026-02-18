@@ -1,0 +1,778 @@
+<?php
+session_start();
+include 'auth_check.php';
+include 'config.php';
+include 'includes/header.php';
+include 'includes/functions.php';
+
+// Handle form submission
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
+    $title = trim($_POST['title'] ?? '');
+    $author = trim($_POST['author'] ?? '');
+    $isbn = trim($_POST['isbn'] ?? '');
+    $category = trim($_POST['category'] ?? '');
+    $quantity = (int)($_POST['quantity'] ?? 0);
+    $shelf_number = isset($_POST['shelf_number']) && $_POST['shelf_number'] !== '' ? (int)$_POST['shelf_number'] : null;
+    $shelf_row = trim($_POST['shelf_row'] ?? '');
+    if ($shelf_row === '') { $shelf_row = null; }
+    $cover_url = trim($_POST['cover_url'] ?? '');
+    if ($cover_url === '') { $cover_url = null; }
+    
+    if (empty($title) || empty($author)) {
+        $_SESSION['error_message'] = 'Title and Author are required!';
+    } else {
+        // Handle cover image: uploaded file or URL
+        $final_cover_url = null;
+        // Ensure upload dir exists
+        $uploadDir = __DIR__ . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'covers';
+        if (!is_dir($uploadDir)) {
+            @mkdir($uploadDir, 0777, true);
+        }
+        // Process file upload if present
+        if (isset($_FILES['cover_file']) && is_uploaded_file($_FILES['cover_file']['tmp_name'])) {
+            $file = $_FILES['cover_file'];
+            if ($file['error'] === UPLOAD_ERR_OK) {
+                $maxSize = 5 * 1024 * 1024; // 5MB
+                if ($file['size'] <= $maxSize) {
+                    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                    $mime = finfo_file($finfo, $file['tmp_name']);
+                    finfo_close($finfo);
+                    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif'];
+                    if (isset($allowed[$mime])) {
+                        $ext = $allowed[$mime];
+                        $safeName = preg_replace('/[^A-Za-z0-9_-]/', '_', strtolower(pathinfo($file['name'], PATHINFO_FILENAME)));
+                        $unique = $safeName . '_' . time() . '_' . mt_rand(1000,9999) . '.' . $ext;
+                        $dest = $uploadDir . DIRECTORY_SEPARATOR . $unique;
+                        if (move_uploaded_file($file['tmp_name'], $dest)) {
+                            // Save relative path for web access
+                            $final_cover_url = 'uploads/covers/' . $unique;
+                        } else {
+                            $_SESSION['error_message'] = 'Failed to save uploaded image.';
+                        }
+                    } else {
+                        $_SESSION['error_message'] = 'Unsupported image format. Please upload JPG, PNG, WEBP, or GIF.';
+                    }
+                } else {
+                    $_SESSION['error_message'] = 'Image too large. Max size is 5MB.';
+                }
+            } else {
+                $_SESSION['error_message'] = 'Image upload error code: ' . $file['error'];
+            }
+        }
+        // If no file, use URL if provided
+        if (!$final_cover_url && !empty($cover_url)) {
+            // Basic validation for URL
+            if (preg_match('/^https?:\/\//i', $cover_url)) {
+                $final_cover_url = $cover_url;
+            } else {
+                $_SESSION['error_message'] = 'Cover URL must start with http or https.';
+            }
+        }
+
+        // Insert into database
+        $stmt = $conn->prepare("INSERT INTO books (title, author, isbn, category, quantity, available_quantity, shelf_number, shelf_row, cover_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        if ($stmt) {
+            // ssss ii i ss => 4 strings, 3 integers, 2 strings
+            $stmt->bind_param("ssssiiiss", $title, $author, $isbn, $category, $quantity, $quantity, $shelf_number, $shelf_row, $final_cover_url);
+        } else {
+            // Fallback for environments where new columns aren't present yet
+            $stmt = $conn->prepare("INSERT INTO books (title, author, isbn, category, quantity, available_quantity) VALUES (?, ?, ?, ?, ?, ?)");
+            if (!$stmt) {
+                $_SESSION['error_message'] = 'Error preparing book insert. Please check DB connection or run migration to add new columns.';
+                header('Location: books.php');
+                exit();
+            }
+            $stmt->bind_param("ssssii", $title, $author, $isbn, $category, $quantity, $quantity);
+        }
+        
+        if ($stmt->execute()) {
+            $_SESSION['success_message'] = 'Book added successfully!';
+        } else {
+            $_SESSION['error_message'] = 'Error adding book: ' . $conn->error;
+        }
+        $stmt->close();
+    }
+    
+    header("Location: books.php");
+    exit();
+}
+?>
+
+<h1>📚 Books Management</h1>
+
+<?php
+// Display success/error messages
+if (isset($_SESSION['success_message'])) {
+    echo '<div class="alert alert-success">' . htmlspecialchars($_SESSION['success_message']) . '</div>';
+    unset($_SESSION['success_message']);
+}
+if (isset($_SESSION['error_message'])) {
+    echo '<div class="alert alert-danger">' . htmlspecialchars($_SESSION['error_message']) . '</div>';
+    unset($_SESSION['error_message']);
+}
+
+if ($db_error) {
+    echo '<div class="alert alert-danger">Database connection error. Please check your configuration.</div>';
+}
+?>
+
+<div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #2196F3;">
+    <p style="color: #0c5460;"><strong>ℹ️ Database Mode:</strong> Connected to library_db - all changes are saved permanently.</p>
+</div>
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+    <h2 style="margin: 0;">Books List</h2>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <label for="sortOrder" style="font-weight: 600; color: #555;">Sort by:</label>
+        <select id="sortOrder" onchange="sortBooks()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.95rem;">
+            <option value="title">Title (A-Z)</option>
+            <option value="author">Author (A-Z)</option>
+            <option value="rating">Rating (High to Low)</option>
+            <option value="reviews">Most Reviewed</option>
+        </select>
+        <button class="btn btn-success" onclick="openBookModal()">➕ Add New</button>
+    </div>
+</div>
+
+<!-- Search Bar -->
+<div style="margin-bottom: 20px;">
+    <div style="display: flex; gap: 10px; max-width: 500px;">
+        <input type="text" id="searchInput" placeholder="🔍 Search by book title..." 
+               style="flex: 1; padding: 10px 15px; border: 2px solid #ddd; border-radius: 4px; font-size: 0.95rem;"
+               onkeyup="if(event.key==='Enter') searchBooks()">
+        <button class="btn btn-primary" onclick="searchBooks()" style="padding: 10px 20px;">Search</button>
+        <button class="btn btn-secondary" onclick="clearSearch()" style="padding: 10px 20px;">Clear</button>
+    </div>
+</div>
+
+<!-- Book Modal -->
+<div id="bookModal" class="modal">
+    <div class="modal-content">
+        <span class="modal-close" onclick="closeBookModal()">&times;</span>
+        <h2 id="bookModalTitle">➕ Add New Book</h2>
+        <form id="bookForm" onsubmit="saveBook(event)">
+            <input type="hidden" id="edit_book_id" name="book_id" value="">
+            <div class="form-group">
+                <label for="title">Title *</label>
+                <input type="text" id="title" name="title" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="author">Author *</label>
+                <input type="text" id="author" name="author" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="isbn">ISBN</label>
+                <input type="text" id="isbn" name="isbn">
+            </div>
+            
+            <div class="form-group">
+                <label for="category">Category</label>
+                <input type="text" id="category" name="category">
+            </div>
+            
+            <div class="form-group">
+                <label for="quantity">Quantity *</label>
+                <input type="number" id="quantity" name="quantity" required min="0" value="1">
+            </div>
+
+            <div class="form-group">
+                <label for="shelf_number">Shelf Number</label>
+                <input type="number" id="shelf_number" name="shelf_number" min="1" placeholder="e.g., 2">
+            </div>
+
+            <div class="form-group">
+                <label for="shelf_row">Row</label>
+                <input type="text" id="shelf_row" name="shelf_row" maxlength="5" placeholder="e.g., B">
+            </div>
+
+            <div class="form-group">
+                <label>Cover Image</label>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="radio" name="cover_source" id="cover_source_upload" value="upload" checked>
+                        Upload from computer
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="radio" name="cover_source" id="cover_source_url" value="url">
+                        Use a URL/link
+                    </label>
+                </div>
+                <div id="coverUploadContainer">
+                    <input type="file" id="cover_file" name="cover_file" accept="image/*">
+                    <small style="color:#666;">Accepted formats: JPG, PNG, WEBP, GIF. Max 5MB.</small>
+                </div>
+                <div id="coverUrlContainer" style="display:none;">
+                    <input type="url" id="cover_url" name="cover_url" placeholder="https://example.com/cover.jpg">
+                    <small style="color:#666;">Provide a direct image link (JPG/PNG/WebP). Optional.</small>
+                </div>
+                <div id="coverPreview" style="margin-top:10px; display:none;">
+                    <img id="coverPreviewImg" src="" alt="Cover preview" style="max-height:180px; border-radius:6px; border:1px solid #ddd;">
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">💾 Save Book</button>
+            <button type="button" class="btn btn-secondary" onclick="closeBookModal()">Cancel</button>
+        </form>
+    </div>
+</div>
+
+<!-- Borrowers Modal -->
+<div id="borrowersModal" class="modal">
+    <div class="modal-content" style="max-width: 800px;">
+        <span class="modal-close" onclick="closeBorrowersModal()">&times;</span>
+        <h2 id="borrowersTitle">👥 Current Borrowers</h2>
+        <div id="availabilityInfo" style="background: #d1ecf1; padding: 10px; border-radius: 5px; margin-bottom: 15px;"></div>
+        <div id="borrowersContent">
+            <p style="text-align: center;">Loading...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Book Info Modal -->
+<div id="bookInfoModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+        <span class="modal-close" onclick="closeBookInfoModal()">&times;</span>
+        <h2 id="bookInfoTitle">📋 Book Information</h2>
+        <div id="bookInfoContent" style="margin-top: 20px;">
+            <p style="text-align: center;">Loading...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Reviews Modal -->
+<div id="reviewsModal" class="modal">
+    <div class="modal-content" style="max-width: 900px;">
+        <span class="modal-close" onclick="closeReviewsModal()">&times;</span>
+        <h2 id="reviewsTitle">⭐ Book Reviews</h2>
+        
+        <!-- Add Review Form -->
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0;">Leave a Review</h3>
+            <form id="reviewForm" onsubmit="submitReview(event)">
+                <input type="hidden" id="review_book_id" name="book_id">
+                <div class="form-group">
+                    <label for="rating">Rating *</label>
+                    <select id="rating" name="rating" required>
+                        <option value="">Select rating</option>
+                        <option value="5">⭐⭐⭐⭐⭐ (5 stars)</option>
+                        <option value="4">⭐⭐⭐⭐ (4 stars)</option>
+                        <option value="3">⭐⭐⭐ (3 stars)</option>
+                        <option value="2">⭐⭐ (2 stars)</option>
+                        <option value="1">⭐ (1 star)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="comment">Comment</label>
+                    <textarea id="comment" name="comment" rows="3" placeholder="Share your thoughts about this book..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">💬 Submit Review</button>
+            </form>
+        </div>
+        
+        <!-- Reviews List -->
+        <div id="reviewsContent">
+            <p style="text-align: center;">Loading...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Books Grid -->
+<div id="booksGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 25px; margin-top: 20px;">
+    <?php
+    if (!$db_error && $conn) {
+        $sql = "SELECT b.*, 
+                COALESCE(AVG(r.rating), 0) as avg_rating,
+                COUNT(r.id) as review_count
+                FROM books b
+                LEFT JOIN book_reviews r ON b.id = r.book_id
+                GROUP BY b.id
+                ORDER BY b.title ASC";
+        
+        $result = $conn->query($sql);
+        
+        if ($result && $result->num_rows > 0) {
+            while ($book = $result->fetch_assoc()) {
+                $avg_rating = round($book['avg_rating'], 1);
+                $stars = '';
+                for ($i = 1; $i <= 5; $i++) {
+                    $stars .= $i <= round($avg_rating) ? '⭐' : '☆';
+                }
+                $rating_text = $avg_rating > 0 ? $avg_rating . ' ' : '';
+                
+                $cover = isset($book['cover_url']) && $book['cover_url'] ? htmlspecialchars($book['cover_url']) : '';
+                $title = htmlspecialchars($book['title']);
+                $author = htmlspecialchars($book['author']);
+                
+                echo "<div class='book-card' data-title='" . strtolower($title) . "' data-author='" . strtolower($author) . "' data-rating='" . $avg_rating . "' data-reviews='" . $book['review_count'] . "' style='background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;' onmouseover='this.style.transform=\"translateY(-5px)\"; this.style.boxShadow=\"0 4px 16px rgba(0,0,0,0.15)\"' onmouseout='this.style.transform=\"translateY(0)\"; this.style.boxShadow=\"0 2px 8px rgba(0,0,0,0.1)\"'>";
+                
+                // Cover Image
+                echo "<div style='position: relative; width: 100%; height: 320px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center;'>";
+                if ($cover) {
+                    echo "<img src='" . $cover . "' alt='" . $title . "' style='width: 100%; height: 100%; object-fit: cover;' onerror=\"this.style.display='none'; this.parentElement.innerHTML='<div style=\\'color: white; font-size: 3rem; opacity: 0.3;\\'>📖</div>'\">";
+                } else {
+                    echo "<div style='color: white; font-size: 3rem; opacity: 0.3;'>📖</div>";
+                }
+                echo "</div>";
+                
+                // Book Info
+                echo "<div style='padding: 15px;'>";
+                echo "<h3 style='margin: 0 0 8px 0; font-size: 1rem; font-weight: 600; color: #333; line-height: 1.3; height: 2.6em; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;'>" . $title . "</h3>";
+                echo "<p style='margin: 0 0 10px 0; color: #666; font-size: 0.9rem;'>" . $author . "</p>";
+                
+                // Rating
+                echo "<div style='margin-bottom: 12px; font-size: 0.85rem; color: #f39c12; font-weight: 500;'>" . $rating_text . $stars . "</div>";
+                
+                // Action Buttons
+                echo "<div style='display: flex; gap: 5px; flex-wrap: wrap;'>";
+                echo "<button onclick='event.stopPropagation(); viewBookInfo(" . $book['id'] . ")' class='btn btn-small btn-success' style='flex: 1; font-size: 0.8rem; padding: 6px 10px;'>ℹ️ Info</button>";
+                echo "<button onclick='event.stopPropagation(); editBook(" . $book['id'] . ")' class='btn btn-small btn-primary' style='flex: 1; font-size: 0.8rem; padding: 6px 10px;'>✏️ Edit</button>";
+                echo "</div>";
+                echo "<div style='display: flex; gap: 5px; margin-top: 5px;'>";
+                echo "<button onclick='event.stopPropagation(); viewReviews(" . $book['id'] . ", \"" . htmlspecialchars($book['title'], ENT_QUOTES) . "\")' class='btn btn-small btn-warning' style='flex: 1; font-size: 0.8rem; padding: 6px 10px;'>⭐ Reviews</button>";
+                echo "<button onclick='event.stopPropagation(); viewBorrowers(" . $book['id'] . ", \"" . htmlspecialchars($book['title'], ENT_QUOTES) . "\", " . $book['available_quantity'] . ")' class='btn btn-small btn-info' style='flex: 1; font-size: 0.8rem; padding: 6px 10px;'>👥 Borrowers</button>";
+                echo "</div>";
+                echo "</div>";
+                
+                echo "</div>";
+            }
+        } else {
+            echo "<div style='grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: #999;'><p style='font-size: 1.2rem;'>📚 No books found. Click 'Add New' to add your first book!</p></div>";
+        }
+    } else {
+        echo "<div style='grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: #e74c3c;'><p>Database connection error.</p></div>";
+    }
+    ?>
+</div>
+
+<div id="noResultsMessage" style="display: none; text-align: center; padding: 60px 20px; color: #999; font-size: 1.2rem;">
+    📚 No books found matching your search.
+</div>
+
+<script>
+function sortBooks() {
+    const sortValue = document.getElementById('sortOrder').value;
+    const grid = document.getElementById('booksGrid');
+    const cards = Array.from(grid.querySelectorAll('.book-card'));
+    
+    cards.sort((a, b) => {
+        if (sortValue === 'title') {
+            const titleA = a.getAttribute('data-title');
+            const titleB = b.getAttribute('data-title');
+            return titleA.localeCompare(titleB);
+        } else if (sortValue === 'author') {
+            const authorA = a.getAttribute('data-author');
+            const authorB = b.getAttribute('data-author');
+            return authorA.localeCompare(authorB);
+        } else if (sortValue === 'rating') {
+            const ratingA = parseFloat(a.getAttribute('data-rating')) || 0;
+            const ratingB = parseFloat(b.getAttribute('data-rating')) || 0;
+            return ratingB - ratingA;
+        } else if (sortValue === 'reviews') {
+            const reviewsA = parseInt(a.getAttribute('data-reviews')) || 0;
+            const reviewsB = parseInt(b.getAttribute('data-reviews')) || 0;
+            return reviewsB - reviewsA;
+        }
+        return 0;
+    });
+    
+    cards.forEach(card => grid.appendChild(card));
+}
+
+function openBookModal() {
+    document.getElementById('bookModalTitle').textContent = '➕ Add New Book';
+    document.getElementById('edit_book_id').value = '';
+    document.getElementById('bookForm').reset();
+    document.getElementById('bookModal').style.display = 'block';
+}
+
+function editBook(bookId) {
+    document.getElementById('bookModalTitle').textContent = '✏️ Edit Book';
+    document.getElementById('bookModal').style.display = 'block';
+    
+    fetch('get_book.php?book_id=' + bookId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert('Error: ' + data.error);
+                closeBookModal();
+            } else {
+                document.getElementById('edit_book_id').value = data.id;
+                document.getElementById('title').value = data.title || '';
+                document.getElementById('author').value = data.author || '';
+                document.getElementById('isbn').value = data.isbn || '';
+                document.getElementById('category').value = data.category || '';
+                document.getElementById('quantity').value = data.quantity || 1;
+                document.getElementById('shelf_number').value = data.shelf_number || '';
+                document.getElementById('shelf_row').value = data.shelf_row || '';
+                document.getElementById('cover_url').value = data.cover_url || '';
+            }
+        })
+        .catch(error => {
+            alert('Error loading book details');
+            closeBookModal();
+        });
+}
+
+function saveBook(event) {
+    event.preventDefault();
+    
+    const bookId = document.getElementById('edit_book_id').value;
+    const formData = new FormData(event.target);
+    const sourceEl = document.querySelector('input[name="cover_source"]:checked');
+    if (sourceEl) { formData.append('cover_source', sourceEl.value); }
+    
+    if (bookId) {
+        // Update existing book
+        fetch('update_book.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(data.message || 'Book updated successfully!');
+                window.location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Failed to update book'));
+            }
+        })
+        .catch(error => {
+            alert('Error updating book. Please try again.');
+        });
+    } else {
+        // Add new book - use fetch to submit multipart data
+        fetch('books.php', { method: 'POST', body: formData })
+        .then(response => {
+            // Added via server-side redirect messages; reload to reflect grid
+            window.location.reload();
+        })
+        .catch(err => {
+            alert('Error adding book. Please try again.');
+        });
+    }
+    
+    return false;
+}
+
+// Cover source toggle and preview
+document.getElementById('cover_source_upload')?.addEventListener('change', () => {
+    document.getElementById('coverUploadContainer').style.display = '';
+    document.getElementById('coverUrlContainer').style.display = 'none';
+});
+document.getElementById('cover_source_url')?.addEventListener('change', () => {
+    document.getElementById('coverUploadContainer').style.display = 'none';
+    document.getElementById('coverUrlContainer').style.display = '';
+});
+
+const coverFileInput = document.getElementById('cover_file');
+const coverUrlInput = document.getElementById('cover_url');
+const coverPrev = document.getElementById('coverPreview');
+const coverPrevImg = document.getElementById('coverPreviewImg');
+
+coverFileInput?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            coverPrevImg.src = reader.result;
+            coverPrev.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    } else {
+        coverPrev.style.display = 'none';
+        coverPrevImg.src = '';
+    }
+});
+
+coverUrlInput?.addEventListener('input', (e) => {
+    const url = e.target.value.trim();
+    if (url) {
+        coverPrevImg.src = url;
+        coverPrev.style.display = 'block';
+    } else {
+        coverPrev.style.display = 'none';
+        coverPrevImg.src = '';
+    }
+});
+
+function closeBookModal() {
+    document.getElementById('bookModal').style.display = 'none';
+    document.getElementById('bookForm').reset();
+    document.getElementById('edit_book_id').value = '';
+    document.getElementById('bookModalTitle').textContent = '➕ Add New Book';
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('bookModal');
+    if (event.target == modal) {
+        closeBookModal();
+    }
+}
+
+// Close modal on ESC key
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        closeBookModal();
+        closeBorrowersModal();
+        closeReviewsModal();
+    }
+});
+
+function viewBorrowers(bookId, bookTitle, availableQty) {
+    const modal = document.getElementById('borrowersModal');
+    const title = document.getElementById('borrowersTitle');
+    const availInfo = document.getElementById('availabilityInfo');
+    const content = document.getElementById('borrowersContent');
+    
+    title.textContent = '👥 Current Borrowers - ' + bookTitle;
+    availInfo.innerHTML = '<strong>📦 Available Copies:</strong> ' + availableQty;
+    content.innerHTML = '<p style="text-align: center;">Loading...</p>';
+    modal.style.display = 'block';
+    
+    // Fetch borrowers via AJAX
+    fetch('get_book_borrowers.php?book_id=' + bookId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                content.innerHTML = '<p style="text-align: center; color: #e74c3c;">' + data.error + '</p>';
+            } else if (data.length === 0) {
+                content.innerHTML = '<p style="text-align: center;">No one is currently borrowing this book.</p>';
+            } else {
+                let html = '<table class="table"><thead><tr>';
+                html += '<th>Student Name</th><th>Class</th><th>Borrow Date</th><th>Due Date</th>';
+                html += '</tr></thead><tbody>';
+                
+                data.forEach(record => {
+                    html += '<tr>';
+                    html += '<td>' + escapeHtml(record.name) + '</td>';
+                    html += '<td>' + (record.class || '-') + '</td>';
+                    html += '<td>' + record.borrow_date + '</td>';
+                    html += '<td>' + record.due_date + '</td>';
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table>';
+                content.innerHTML = html;
+            }
+        })
+        .catch(error => {
+            content.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading borrowers.</p>';
+        });
+}
+
+function closeBorrowersModal() {
+    document.getElementById('borrowersModal').style.display = 'none';
+}
+
+function searchBooks() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase().trim();
+    const cards = document.querySelectorAll('.book-card');
+    const noResultsMsg = document.getElementById('noResultsMessage');
+    let visibleCount = 0;
+    
+    cards.forEach(card => {
+        const title = card.getAttribute('data-title');
+        if (title.includes(searchTerm)) {
+            card.style.display = '';
+            visibleCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+    
+    if (visibleCount === 0 && searchTerm !== '') {
+        noResultsMsg.style.display = 'block';
+    } else {
+        noResultsMsg.style.display = 'none';
+    }
+}
+
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    const cards = document.querySelectorAll('.book-card');
+    cards.forEach(card => {
+        card.style.display = '';
+    });
+    document.getElementById('noResultsMessage').style.display = 'none';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Close modals when clicking outside
+window.addEventListener('click', function(event) {
+    const borrowersModal = document.getElementById('borrowersModal');
+    const reviewsModal = document.getElementById('reviewsModal');
+    const bookInfoModal = document.getElementById('bookInfoModal');
+    if (event.target == borrowersModal) {
+        closeBorrowersModal();
+    }
+    if (event.target == reviewsModal) {
+        closeReviewsModal();
+    }
+    if (event.target == bookInfoModal) {
+        closeBookInfoModal();
+    }
+});
+
+function viewReviews(bookId, bookTitle) {
+    const modal = document.getElementById('reviewsModal');
+    const title = document.getElementById('reviewsTitle');
+    const content = document.getElementById('reviewsContent');
+    
+    title.textContent = '⭐ Reviews - ' + bookTitle;
+    document.getElementById('review_book_id').value = bookId;
+    content.innerHTML = '<p style="text-align: center;">Loading...</p>';
+    modal.style.display = 'block';
+    
+    loadReviews(bookId);
+}
+
+function loadReviews(bookId) {
+    const content = document.getElementById('reviewsContent');
+    content.innerHTML = '<p style="text-align: center;">Loading reviews...</p>';
+    
+    // Add timestamp to prevent caching
+    fetch('get_book_reviews.php?book_id=' + bookId + '&t=' + Date.now())
+        .then(response => {
+            if (!response.ok) throw new Error('Network response was not ok');
+            return response.json();
+        })
+        .then(data => {
+            if (data.error) {
+                content.innerHTML = '<p style="text-align: center; color: #e74c3c;">' + data.error + '</p>';
+            } else if (data.length === 0) {
+                content.innerHTML = '<p style="text-align: center;">No reviews yet. Be the first to review this book!</p>';
+            } else {
+                let html = '<div style="margin-top: 20px;">';
+                
+                data.forEach(review => {
+                    const stars = '⭐'.repeat(review.rating);
+                    html += '<div style="background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 5px; margin-bottom: 15px;">';
+                    html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">';
+                    html += '<strong>' + escapeHtml(review.name) + '</strong>';
+                    html += '<span style="color: #f39c12;">' + stars + '</span>';
+                    html += '</div>';
+                    if (review.comment) {
+                        html += '<p style="margin: 10px 0; color: #555;">' + escapeHtml(review.comment) + '</p>';
+                    }
+                    html += '<small style="color: #999;">' + review.created_at + '</small>';
+                    html += '</div>';
+                });
+                
+                html += '</div>';
+                content.innerHTML = html;
+            }
+        })
+        .catch(error => {
+            content.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading reviews.</p>';
+        });
+}
+
+function submitReview(event) {
+    event.preventDefault();
+    
+    const rating = document.getElementById('rating').value;
+    const comment = document.getElementById('comment').value.trim();
+    const bookId = document.getElementById('review_book_id').value;
+    
+    // Validate rating
+    if (!rating) {
+        alert('Please select a rating');
+        return false;
+    }
+    
+    // Disable submit button to prevent double submission
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+    
+    const formData = new FormData(event.target);
+    
+    fetch('submit_review.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) throw new Error('Network error');
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert(data.message || 'Review submitted successfully!');
+            event.target.reset();
+            // Reload reviews immediately
+            setTimeout(() => loadReviews(bookId), 100);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to submit review'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error submitting review. Please try again.');
+    })
+    .finally(() => {
+        // Re-enable submit button
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+    });
+    
+    return false;
+}
+
+function viewBookInfo(bookId) {
+    const modal = document.getElementById('bookInfoModal');
+    const content = document.getElementById('bookInfoContent');
+    
+    content.innerHTML = '<p style="text-align: center;">Loading...</p>';
+    modal.style.display = 'block';
+    
+    fetch('get_book.php?book_id=' + bookId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                content.innerHTML = '<p style="text-align: center; color: #e74c3c;">' + data.error + '</p>';
+            } else {
+                let shelfNum = data.shelf_number || '-';
+                let shelfRow = data.shelf_row || '-';
+                let location = shelfNum !== '-' || shelfRow !== '-' ? 
+                    (shelfNum !== '-' ? shelfNum + (shelfNum == 1 ? 'st' : shelfNum == 2 ? 'nd' : shelfNum == 3 ? 'rd' : 'th') + ' shelf' : '') + 
+                    (shelfRow !== '-' ? (shelfNum !== '-' ? ', ' : '') + 'row ' + shelfRow : '') : '-';
+                
+                let html = '<div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">';
+                html += '<div style="display: grid; gap: 15px;">';
+                html += '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;"><strong>📚 Title:</strong><span>' + escapeHtml(data.title) + '</span></div>';
+                html += '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;"><strong>✍️ Author:</strong><span>' + escapeHtml(data.author) + '</span></div>';
+                html += '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;"><strong>🔢 ISBN:</strong><span>' + (data.isbn || '-') + '</span></div>';
+                html += '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;"><strong>📁 Category:</strong><span>' + escapeHtml(data.category || '-') + '</span></div>';
+                html += '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;"><strong>📦 Total Quantity:</strong><span>' + data.quantity + '</span></div>';
+                html += '<div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;"><strong>✅ Available:</strong><span style="color: ' + (data.available_quantity > 0 ? '#28a745' : '#dc3545') + '; font-weight: 600;">' + data.available_quantity + '</span></div>';
+                html += '<div style="display: flex; justify-content: space-between; padding: 10px 0;"><strong>📍 Location:</strong><span>' + location + '</span></div>';
+                html += '</div>';
+                html += '</div>';
+                content.innerHTML = html;
+            }
+        })
+        .catch(error => {
+            content.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading book information.</p>';
+        });
+}
+
+function closeBookInfoModal() {
+    document.getElementById('bookInfoModal').style.display = 'none';
+}
+
+function closeReviewsModal() {
+    document.getElementById('reviewsModal').style.display = 'none';
+    document.getElementById('reviewForm').reset();
+}
+</script>
+
+<?php include 'includes/footer.php'; ?>
