@@ -1,6 +1,6 @@
-    </div>
+    </main>
     <footer>
-        <p>&copy; 2025 Library Management System. All rights reserved.</p>
+        School Library &copy; <?php echo date('Y'); ?>
     </footer>
     <script src="js/script.js"></script>
 </body>

@@ -56,41 +56,47 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
-// Use site header/footer for consistent theme
+$page_title = 'Log in';
+$hide_nav = true;
 include 'includes/header.php';
 ?>
 
-<div class="login-page">
-    <div class="login-container">
-        <div class="login-header">
-            <h1>📚 Library</h1>
-            <p>Management System</p>
+<div class="auth-page">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <span class="logo-mark"><?php echo icon('library', 22); ?></span>
+            <div>
+                <strong>School Library</strong>
+                <span>Books, loans and reading history</span>
+            </div>
         </div>
 
+        <h1>Log in</h1>
+        <p class="lead">Use your library account to continue.</p>
+
         <?php if ($error): ?>
-            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+            <div class="alert alert-danger"><?php echo icon('alert', 16) . htmlspecialchars($error); ?></div>
         <?php endif; ?>
         <?php if ($success): ?>
-            <div class="alert alert-success"><?php echo htmlspecialchars($success); ?></div>
+            <div class="alert alert-success"><?php echo icon('check-circle', 16) . htmlspecialchars($success); ?></div>
         <?php endif; ?>
 
-        <form method="POST" action="">
+        <form method="POST" action="" class="auth-panel">
             <div class="form-group">
                 <label for="username">Username or email</label>
-                <input type="text" id="username" name="username" required autocomplete="username" placeholder="Enter username or email">
+                <input type="text" id="username" name="username" required autocomplete="username"
+                       value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
             </div>
 
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Enter password">
+                <input type="password" id="password" name="password" required autocomplete="current-password">
             </div>
 
-            <button type="submit" class="btn btn-login">Login</button>
+            <button type="submit" class="btn btn-login">Log in</button>
         </form>
 
-        <p style="text-align: center; margin-top: 20px;">
-            No account yet? <a href="register.php">Create one</a>
-        </p>
+        <p class="auth-switch">New student? <a href="register.php">Create an account</a></p>
     </div>
 </div>
 

@@ -87,187 +87,40 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     }
 }
+
+$page_title = 'Create account';
+$hide_nav = true;
+include 'includes/header.php';
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - Library Management System</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        
-        .register-container {
-            background: white;
-            padding: 40px;
-            border-radius: 10px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-            width: 100%;
-            max-width: 450px;
-        }
-        
-        .register-header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .register-header h1 {
-            color: #2c3e50;
-            font-size: 2rem;
-            margin-bottom: 10px;
-        }
-        
-        .register-header p {
-            color: #7f8c8d;
-            font-size: 1rem;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #2c3e50;
-            font-weight: 600;
-        }
-        
-        .form-group input {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #ecf0f1;
-            border-radius: 5px;
-            font-size: 1rem;
-            transition: border-color 0.3s;
-        }
-        
-        .form-group input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        .btn-register {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        
-        .btn-register:hover {
-            transform: translateY(-2px);
-        }
-        
-        .btn-register:active {
-            transform: translateY(0);
-        }
-        
-        .alert {
-            padding: 12px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            font-weight: 500;
-        }
-        
-        .alert-error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .alert-success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .form-links {
-            text-align: center;
-            margin-top: 20px;
-            color: #7f8c8d;
-        }
-        
-        .form-links a {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 600;
-            transition: color 0.3s;
-        }
-        
-        .form-links a:hover {
-            color: #764ba2;
-        }
-        
-        .password-requirements {
-            background-color: #f0f0f0;
-            border-left: 4px solid #667eea;
-            padding: 12px;
-            border-radius: 5px;
-            margin-top: 20px;
-            font-size: 0.85rem;
-            color: #555;
-        }
-        
-        .password-requirements h4 {
-            color: #2c3e50;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
-        }
-        
-        .password-requirements ul {
-            margin-left: 20px;
-            line-height: 1.6;
-        }
-    </style>
-</head>
-<body>
-    <div class="register-container">
-        <div class="register-header">
-            <h1>📚 Library</h1>
-            <p>Create New Account</p>
-        </div>
-        
-        <?php if ($error): ?>
-            <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
-        <?php endif; ?>
-        
-        <?php if ($success): ?>
-            <div class="alert alert-success">
-                <?php echo htmlspecialchars($success); ?>
-                <div style="margin-top: 10px;">
-                    <a href="login.php" style="color: #155724; text-decoration: none; font-weight: 600;">→ Go to Login</a>
-                </div>
+
+<div class="auth-page">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <span class="logo-mark"><?php echo icon('library', 22); ?></span>
+            <div>
+                <strong>School Library</strong>
+                <span>Books, loans and reading history</span>
             </div>
+        </div>
+
+        <h1>Create your account</h1>
+        <p class="lead">For students. Your librarian can see your loans and reviews.</p>
+
+        <?php if ($error): ?>
+            <div class="alert alert-danger"><?php echo icon('alert', 16) . htmlspecialchars($error); ?></div>
         <?php endif; ?>
-        
-        <form method="POST" action="">
+
+        <form method="POST" action="" class="auth-panel">
             <div class="form-group">
-                <label for="full_name">Full Name</label>
-                <input type="text" id="full_name" name="full_name" required placeholder="First and last name" value="<?php echo htmlspecialchars($_POST['full_name'] ?? ''); ?>">
+                <label for="full_name">Full name</label>
+                <input type="text" id="full_name" name="full_name" required autocomplete="name"
+                       value="<?php echo htmlspecialchars($_POST['full_name'] ?? ''); ?>">
             </div>
 
             <div class="form-group">
-                <label for="class">Class <span style="font-weight: 400; color: #7f8c8d;">(optional)</span></label>
-                <input type="text" id="class" name="class" list="class_list" placeholder="e.g. Year 10A" value="<?php echo htmlspecialchars($_POST['class'] ?? ''); ?>">
+                <label for="class">Class <span class="muted">(optional)</span></label>
+                <input type="text" id="class" name="class" list="class_list" placeholder="e.g. Year 10A"
+                       value="<?php echo htmlspecialchars($_POST['class'] ?? ''); ?>">
                 <datalist id="class_list">
                     <?php foreach ($class_options as $c): ?>
                         <option value="<?php echo htmlspecialchars($c); ?>">
@@ -277,39 +130,33 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             <div class="form-group">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" required placeholder="Choose a username" value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
+                <input type="text" id="username" name="username" required autocomplete="username"
+                       value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
+                <p class="form-hint">At least 3 characters: letters, numbers, _ . -</p>
             </div>
-            
+
             <div class="form-group">
-                <label for="email">Email Address</label>
-                <input type="email" id="email" name="email" required placeholder="Enter your email" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required autocomplete="email"
+                       value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
             </div>
-            
+
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" required placeholder="Enter password (min 6 characters)">
+                <input type="password" id="password" name="password" required minlength="6" autocomplete="new-password">
+                <p class="form-hint">At least 6 characters.</p>
             </div>
-            
+
             <div class="form-group">
-                <label for="confirm_password">Confirm Password</label>
-                <input type="password" id="confirm_password" name="confirm_password" required placeholder="Confirm password">
+                <label for="confirm_password">Repeat password</label>
+                <input type="password" id="confirm_password" name="confirm_password" required minlength="6" autocomplete="new-password">
             </div>
-            
-            <button type="submit" class="btn-register">Create Account</button>
-            
-            <div class="form-links">
-                Already have an account? <a href="login.php">Login here</a>
-            </div>
+
+            <button type="submit" class="btn btn-login">Create account</button>
         </form>
-        
-        <div class="password-requirements">
-            <h4>✓ Password Requirements:</h4>
-            <ul>
-                <li>At least 6 characters long</li>
-                <li>Must match confirmation</li>
-                <li>Use strong passwords</li>
-            </ul>
-        </div>
+
+        <p class="auth-switch">Already have an account? <a href="login.php">Log in</a></p>
     </div>
-</body>
-</html>
+</div>
+
+<?php include 'includes/footer.php'; ?>

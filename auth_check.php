@@ -1,4 +1,7 @@
 <?php
+// Buffer the whole page so it can still redirect after the header is printed.
+// (PHP's default 4 KB buffer is not enough: the header alone is bigger.)
+ob_start();
 // Start session if not already started
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
