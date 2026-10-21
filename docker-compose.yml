@@ -1,0 +1,38 @@
+# Run the whole project with one command:  docker compose up
+# Then open http://localhost:8080  (logins are in the README)
+services:
+  db:
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: library
+      MARIADB_ROOT_PASSWORD: library
+    volumes:
+      # imported once, in this order, the first time the database starts
+      - ./library.sql:/docker-entrypoint-initdb.d/1-library.sql:ro
+      - ./add_users_table.sql:/docker-entrypoint-initdb.d/2-add_users_table.sql:ro
+      - ./fix_data.sql:/docker-entrypoint-initdb.d/3-fix_data.sql:ro
+      - db-data:/var/lib/mysql
+    ports:
+      - "3307:3306"   # optional: connect a DB tool to localhost:3307 (user root, password library)
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  web:
+    build: .
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASS: library
+      DB_NAME: library
+    ports:
+      - "8080:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

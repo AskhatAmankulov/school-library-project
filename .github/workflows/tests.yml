@@ -1,0 +1,58 @@
+name: Tests
+
+# Runs on every push and pull request, and from the Actions tab ("Run workflow").
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the site and database with Docker (same as "docker compose up")
+        run: docker compose up -d --build
+
+      - name: Wait until the site answers
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:8080/landing.php && echo "Site is up" && exit 0
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test tools
+        run: |
+          pip install -r tests/requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run all tests
+        env:
+          BASE_URL: http://localhost:8080
+          DB_HOST: 127.0.0.1
+          DB_PORT: "3307"
+          DB_USER: root
+          DB_PASS: library
+          DB_NAME: library
+        run: python tests/run_all.py
+
+      - name: No PHP errors or warnings in the server log
+        if: always()
+        run: |
+          docker compose logs web > web.log 2>&1
+          if grep -E "PHP (Fatal|Warning|Notice|Deprecated|Parse)" web.log; then
+            echo "PHP reported problems (see above)"; exit 1
+          fi
+          echo "Server log is clean"
+
+      - name: Server logs (only when something failed)
+        if: failure()
+        run: docker compose logs

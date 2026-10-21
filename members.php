@@ -30,11 +30,8 @@ if (!$db_error && is_staff() && isset($_POST['import_csv'])) {
         header('Location: members.php');
         exit;
     }
-    $uploadDir = __DIR__ . DIRECTORY_SEPARATOR . 'uploads';
-    if (!is_dir($uploadDir)) { @mkdir($uploadDir, 0777, true); }
-    $tmpName = $_FILES['csv_file']['tmp_name'];
-    $dest = $uploadDir . DIRECTORY_SEPARATOR . ('import_' . time() . '_' . basename($_FILES['csv_file']['name']));
-    if (!@move_uploaded_file($tmpName, $dest)) { $dest = $_FILES['csv_file']['tmp_name']; }
+    // Read the upload straight from PHP's temporary folder (it is deleted automatically)
+    $dest = $_FILES['csv_file']['tmp_name'];
 
     if (($handle = fopen($dest, 'r')) !== false) {
         // Check optional columns
@@ -137,8 +134,6 @@ if (!$db_error && is_staff() && isset($_POST['import_csv'])) {
             }
         }
         fclose($handle);
-        // Cleanup uploaded file if we moved it
-        if (is_file($dest)) { @unlink($dest); }
         $_SESSION['success_message'] = 'Import finished. Inserted: ' . $summary['inserted'] . ', Updated: ' . $summary['updated'] . ', Errors: ' . count($summary['errors']);
         if (!empty($summary['errors'])) {
             $_SESSION['success_message'] .= '. Details: ' . implode('; ', array_slice($summary['errors'], 0, 5));
