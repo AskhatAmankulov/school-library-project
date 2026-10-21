@@ -7,20 +7,34 @@ if (isset($_SESSION['user_id'])) {
     exit();
 }
 
+include 'config.php';
+
 $error = '';
 $success = '';
 
+// Existing class names, offered as suggestions in the form
+$class_options = [];
+try {
+    $class_options = $pdo_conn->query(
+        "SELECT DISTINCT class FROM members WHERE class IS NOT NULL AND class <> '' ORDER BY class"
+    )->fetchAll(PDO::FETCH_COLUMN);
+} catch (PDOException $e) {
+    // Suggestions are optional
+}
+
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $full_name = trim($_POST['full_name'] ?? '');
+    $class = trim($_POST['class'] ?? '');
     $username = trim($_POST['username'] ?? '');
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
     $confirm_password = $_POST['confirm_password'] ?? '';
-    
+
     // Validation
-    if (empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
-        $error = 'All fields are required!';
-    } elseif (strlen($username) < 3) {
-        $error = 'Username must be at least 3 characters!';
+    if (empty($full_name) || empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
+        $error = 'Please fill in all required fields!';
+    } elseif (strlen($username) < 3 || !preg_match('/^[A-Za-z0-9_.-]+$/', $username)) {
+        $error = 'Username must be at least 3 characters: letters, numbers, _ . - only.';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $error = 'Please enter a valid email!';
     } elseif (strlen($password) < 6) {
@@ -28,19 +42,49 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     } elseif ($password !== $confirm_password) {
         $error = 'Passwords do not match!';
     } else {
-        // In demo mode, we'll simulate registration
-        // In production, save to database
-        $_SESSION['new_user'] = [
-            'username' => $username,
-            'email' => $email,
-            'password' => password_hash($password, PASSWORD_BCRYPT),
-            'role' => 'user',
-            'created_at' => date('Y-m-d H:i:s')
-        ];
-        
-        $success = 'Registration successful! You can now login.';
-        // Clear form
-        $_POST = [];
+        try {
+            // Username or email already taken?
+            $check = $pdo_conn->prepare(
+                "SELECT
+                    (SELECT COUNT(*) FROM users WHERE username = ?) AS u,
+                    (SELECT COUNT(*) FROM users WHERE email = ?) + (SELECT COUNT(*) FROM members WHERE email = ?) AS e"
+            );
+            $check->execute([$username, $email, $email]);
+            $taken = $check->fetch(PDO::FETCH_ASSOC);
+
+            if ($taken['u'] > 0) {
+                $error = 'This username is already taken.';
+            } elseif ($taken['e'] > 0) {
+                $error = 'An account with this email already exists.';
+            } else {
+                // Create the member (library card) and the login account together
+                $pdo_conn->beginTransaction();
+
+                $name_parts = preg_split('/\s+/', $full_name, 2);
+                $stmt = $pdo_conn->prepare(
+                    "INSERT INTO members (name, first_name, last_name, class, email, membership_date, status)
+                     VALUES (?, ?, ?, ?, ?, CURDATE(), 'active')"
+                );
+                $stmt->execute([$full_name, $name_parts[0], $name_parts[1] ?? '', $class !== '' ? $class : null, $email]);
+                $member_id = (int)$pdo_conn->lastInsertId();
+
+                $stmt = $pdo_conn->prepare(
+                    "INSERT INTO users (username, email, password_hash, role, member_id)
+                     VALUES (?, ?, ?, 'user', ?)"
+                );
+                $stmt->execute([$username, $email, password_hash($password, PASSWORD_DEFAULT), $member_id]);
+
+                $pdo_conn->commit();
+
+                header("Location: login.php?registered=1");
+                exit();
+            }
+        } catch (PDOException $e) {
+            if ($pdo_conn->inTransaction()) {
+                $pdo_conn->rollBack();
+            }
+            $error = 'Could not create the account. Make sure add_users_table.sql was imported.';
+        }
     }
 }
 ?>
@@ -216,6 +260,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         <?php endif; ?>
         
         <form method="POST" action="">
+            <div class="form-group">
+                <label for="full_name">Full Name</label>
+                <input type="text" id="full_name" name="full_name" required placeholder="First and last name" value="<?php echo htmlspecialchars($_POST['full_name'] ?? ''); ?>">
+            </div>
+
+            <div class="form-group">
+                <label for="class">Class <span style="font-weight: 400; color: #7f8c8d;">(optional)</span></label>
+                <input type="text" id="class" name="class" list="class_list" placeholder="e.g. Year 10A" value="<?php echo htmlspecialchars($_POST['class'] ?? ''); ?>">
+                <datalist id="class_list">
+                    <?php foreach ($class_options as $c): ?>
+                        <option value="<?php echo htmlspecialchars($c); ?>">
+                    <?php endforeach; ?>
+                </datalist>
+            </div>
+
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required placeholder="Choose a username" value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">

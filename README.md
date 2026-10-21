@@ -1,87 +1,37 @@
-# Library Management System - Setup Instructions
+# School Library Management System
 
-## Prerequisites
+A PHP + MySQL web app for running a school library: books, students, borrowings, reviews and user accounts with roles (admin, librarian, student).
 
-- XAMPP installed and running
-- Apache and MySQL services active
-- PHPMyAdmin accessible at `http://localhost/phpmyadmin`
+## Requirements
 
-## Step 1: Create Database
+- [XAMPP](https://www.apachefriends.org/) (Apache + PHP + MySQL/MariaDB)
 
-1. Open PHPMyAdmin: http://localhost/phpmyadmin
-2. Click "New" or "Create database"
-3. Database name: `library_db`
-4. Collation: `utf8_general_ci`
-5. Click "Create"
+## Setup
 
-## Step 2: Create Tables
+1. Put the project in `C:\xampp\htdocs\lib`
+   ```
+   cd C:\xampp\htdocs
+   git clone https://github.com/AskhatAmankulov/school-library-project.git lib
+   ```
+2. Open the XAMPP Control Panel and start **Apache** and **MySQL**.
+3. Open http://localhost/phpmyadmin and create a database named **`library`**.
+4. Select `library`, open the **Import** tab and import these two files, in this order:
+   1. `library.sql`: all tables and sample data
+   2. `add_users_table.sql`: login accounts
+5. Open http://localhost/lib/login.php
 
-Copy and paste the following SQL in the SQL tab of PHPMyAdmin:
+The other `add_*.sql` files and `setup.sql` are old migration steps. They are already included in `library.sql`, so don't run them.
 
-```sql
--- Create Books Table
-CREATE TABLE books (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(255) NOT NULL,
-  author VARCHAR(255) NOT NULL,
-  isbn VARCHAR(20) UNIQUE,
-  publication_date DATE,
-  quantity INT DEFAULT 0,
-  available_quantity INT DEFAULT 0,
-  category VARCHAR(100),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+## Accounts
 
--- Create Members Table
-CREATE TABLE members (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(255) NOT NULL,
-  email VARCHAR(255) UNIQUE,
-  phone VARCHAR(20),
-  address TEXT,
-  membership_date DATE,
-  status ENUM('active', 'inactive') DEFAULT 'active',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+| Username | Password | Role |
+|---|---|---|
+| admin | admin123 | Admin |
+| librarian | librarian123 | Librarian |
+| user | user123 | Student |
+| askhat, emma, liam, sophia, noah | 123 | Student |
 
--- Create Borrowings Table
-CREATE TABLE borrowings (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  member_id INT NOT NULL,
-  book_id INT NOT NULL,
-  borrow_date DATE NOT NULL,
-  due_date DATE NOT NULL,
-  return_date DATE,
-  status ENUM('active', 'returned') DEFAULT 'active',
-  FOREIGN KEY (member_id) REFERENCES members(id),
-  FOREIGN KEY (book_id) REFERENCES books(id)
-);
-```
-
-## Step 3: Access the Application
-
-1. Start XAMPP (Apache and MySQL)
-2. Open browser: `http://localhost/lib`
-3. You should see the Library Dashboard
-
-## File Structure
-
-```
-c:\xampp\htdocs\lib\
-├── index.php                 (Dashboard)
-├── books.php                 (Books Management)
-├── members.php               (Members Management)
-├── borrowings.php            (Borrowings Management)
-├── config.php                (Database Connection)
-├── includes/
-│   ├── header.php           (HTML Header)
-│   ├── footer.php           (HTML Footer)
-│   └── functions.php        (Utility Functions)
-├── css/
-│   └── style.css            (Styling)
-└── js/
-    └── script.js            (JavaScript)
-```
+Students can create their own account at `register.php`. Every account is stored in the `users` table and linked to a row in `members`.
 
 ## Features
 
@@ -113,50 +63,15 @@ c:\xampp\htdocs\lib\
 - View overdue books
 - See borrowing history
 
-## Sample Data (Optional)
+### Accounts & Profile (login.php, register.php, profile.php)
 
-Insert sample data into PHPMyAdmin:
-
-```sql
--- Sample Books
-INSERT INTO books (title, author, isbn, publication_date, quantity, available_quantity, category)
-VALUES
-('The Great Gatsby', 'F. Scott Fitzgerald', '978-0-7432-7356-5', '1925-04-10', 5, 5, 'Fiction'),
-('To Kill a Mockingbird', 'Harper Lee', '978-0-06-112008-4', '1960-07-11', 3, 2, 'Fiction'),
-('1984', 'George Orwell', '978-0-452-26059-5', '1949-06-08', 4, 4, 'Dystopian');
-
--- Sample Members
-INSERT INTO members (name, email, phone, address, membership_date, status)
-VALUES
-('John Doe', 'john@example.com', '555-0001', '123 Main St', CURDATE(), 'active'),
-('Jane Smith', 'jane@example.com', '555-0002', '456 Oak Ave', CURDATE(), 'active'),
-('Bob Johnson', 'bob@example.com', '555-0003', '789 Pine Rd', CURDATE(), 'active');
-```
+- Log in with username or email
+- Self-registration for students (creates the member and the account)
+- Change password, upload a profile photo
+- Borrowing history and reviews on the profile page
 
 ## Troubleshooting
 
-### Database Connection Error
-
-- Check MySQL is running in XAMPP
-- Verify credentials in `config.php`
-- Ensure database `library_db` exists
-
-### Page Not Found
-
-- Check file location: `c:\xampp\htdocs\lib\`
-- Verify Apache is running
-- Try `http://localhost/lib/index.php`
-
-### Styling Issues
-
-- Clear browser cache (Ctrl+Shift+Delete)
-- Ensure CSS file is loading: check browser console
-
-## Future Enhancements
-
-- User authentication/login system
-- Email notifications for overdue books
-- Book search and filters
-- Member reports
-- PDF export functionality
-- Fine calculation for overdue books
+- **"Database connection failed"**: MySQL isn't running. Restart it in the XAMPP Control Panel (run it as Administrator).
+- **"The users table is missing"**: import `add_users_table.sql` (step 4).
+- **Page not found**: check the files are in `C:\xampp\htdocs\lib` and Apache is running.

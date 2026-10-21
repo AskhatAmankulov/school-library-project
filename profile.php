@@ -2,95 +2,99 @@
 session_start();
 include 'auth_check.php';
 include 'config.php';
-include 'includes/header.php';
 
-// Handle password change
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['change_password']) && !$db_error) {
-    $user_id = $_SESSION['user_id'];
+$role = $_SESSION['role'] ?? 'user';
+$is_staff = in_array($role, ['admin', 'librarian'], true);
+
+// ---------- Change own password ----------
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['change_password'])) {
     $current_password = $_POST['current_password'] ?? '';
     $new_password = $_POST['new_password'] ?? '';
     $confirm_password = $_POST['confirm_password'] ?? '';
-    
-    // Load demo users
-    include 'demo_users.php';
-    
-    // Find current user
-    $current_user = null;
-    foreach ($demo_users as $user) {
-        if ($user['id'] == $user_id) {
-            $current_user = $user;
-            break;
-        }
-    }
-    
-    if (!$current_user) {
-        $_SESSION['error_message'] = 'User not found.';
+
+    $stmt = $pdo_conn->prepare("SELECT id, password_hash FROM users WHERE id = ?");
+    $stmt->execute([$_SESSION['account_id'] ?? 0]);
+    $account = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$account) {
+        $_SESSION['error_message'] = 'Account not found. Please log out and log in again.';
     } elseif (empty($current_password) || empty($new_password) || empty($confirm_password)) {
         $_SESSION['error_message'] = 'All password fields are required.';
-    } elseif (!password_verify($current_password, $current_user['password'])) {
+    } elseif (!password_verify($current_password, $account['password_hash'])) {
         $_SESSION['error_message'] = 'Current password is incorrect.';
     } elseif ($new_password !== $confirm_password) {
         $_SESSION['error_message'] = 'New passwords do not match.';
     } elseif (strlen($new_password) < 6) {
         $_SESSION['error_message'] = 'New password must be at least 6 characters long.';
     } else {
-        // Update password in demo_users.php file
-        $file_path = __DIR__ . '/demo_users.php';
-        $file_content = file_get_contents($file_path);
-        
-        // Find and replace the password hash for this user
-        $old_hash = $current_user['password'];
-        $new_hash = password_hash($new_password, PASSWORD_BCRYPT);
-        
-        $file_content = str_replace($old_hash, $new_hash, $file_content);
-        
-        if (file_put_contents($file_path, $file_content)) {
-            $_SESSION['success_message'] = 'Password changed successfully!';
-        } else {
-            $_SESSION['error_message'] = 'Failed to update password. Check file permissions.';
-        }
+        $pdo_conn->prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+                 ->execute([password_hash($new_password, PASSWORD_DEFAULT), $account['id']]);
+        $_SESSION['success_message'] = 'Password changed successfully!';
     }
-    
-    header("Location: profile.php?id=" . $user_id);
+
+    header("Location: profile.php?id=" . (int)$_SESSION['user_id']);
     exit();
 }
 
-// Handle avatar upload (admin can edit any user, users can edit themselves)
+// ---------- Update avatar (admin: anyone, others: only themselves) ----------
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_avatar'])) {
-    // Avatar upload disabled for demo users - database table required
-    $_SESSION['error_message'] = 'Avatar upload requires database setup. Feature currently unavailable.';
-    $member_id_redirect = $_SESSION['role'] === 'admin' ? (int)$_POST['member_id'] : (int)$_SESSION['user_id'];
-    header("Location: profile.php?id=" . $member_id_redirect);
-    exit();
-}
+    $target_id = ($role === 'admin' && isset($_POST['member_id'])) ? (int)$_POST['member_id'] : (int)$_SESSION['user_id'];
+    $new_avatar = null;
 
-// Get member ID from query or session
-$member_id = isset($_GET['id']) ? (int)$_GET['id'] : ($_SESSION['user_id'] ?? null);
+    if (($_POST['avatar_source'] ?? 'upload') === 'url') {
+        $url = trim($_POST['avatar_url'] ?? '');
+        if (filter_var($url, FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $url)) {
+            $new_avatar = $url;
+        } else {
+            $_SESSION['error_message'] = 'Please enter a valid image link (http/https).';
+        }
+    } elseif (!empty($_FILES['avatar_file']['tmp_name']) && $_FILES['avatar_file']['error'] === UPLOAD_ERR_OK) {
+        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif'];
+        $info = @getimagesize($_FILES['avatar_file']['tmp_name']);
 
-if (!$member_id) {
-    echo '<div class="alert alert-danger">Unable to load profile.</div>';
-    include 'includes/footer.php';
-    exit();
-}
-
-// Load demo users
-include 'demo_users.php';
-
-// Find member in demo users
-$member = null;
-foreach ($demo_users as $user) {
-    if ($user['id'] == $member_id) {
-        $member = [
-            'id' => $user['id'],
-            'name' => $user['username'],
-            'class' => 'N/A',
-            'status' => 'active',
-            'membership_date' => '2024-01-01',
-            'avatar_url' => null
-        ];
-        break;
+        if ($_FILES['avatar_file']['size'] > 5 * 1024 * 1024) {
+            $_SESSION['error_message'] = 'Image is too large (max 5MB).';
+        } elseif (!$info || !isset($allowed[$info['mime']])) {
+            $_SESSION['error_message'] = 'Only JPG, PNG, WEBP or GIF images are allowed.';
+        } else {
+            $dir = __DIR__ . '/uploads/avatars';
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+            $filename = 'avatar_' . $target_id . '_' . time() . '_' . rand(1000, 9999) . '.' . $allowed[$info['mime']];
+            if (move_uploaded_file($_FILES['avatar_file']['tmp_name'], $dir . '/' . $filename)) {
+                $new_avatar = 'uploads/avatars/' . $filename;
+            } else {
+                $_SESSION['error_message'] = 'Could not save the image.';
+            }
+        }
+    } else {
+        $_SESSION['error_message'] = 'Please choose an image.';
     }
+
+    if ($new_avatar) {
+        $pdo_conn->prepare("UPDATE members SET avatar_url = ? WHERE id = ?")->execute([$new_avatar, $target_id]);
+        $_SESSION['success_message'] = 'Profile photo updated!';
+    }
+
+    header("Location: profile.php?id=" . $target_id);
+    exit();
 }
+
+include 'includes/header.php';
+
+// ---------- Which profile to show ----------
+// Students can only see their own profile; admin/librarian can open anyone's.
+$member_id = (int)$_SESSION['user_id'];
+if ($is_staff && isset($_GET['id'])) {
+    $member_id = (int)$_GET['id'];
+}
+
+$stmt = $pdo_conn->prepare(
+    "SELECT id, name, class, status, membership_date, avatar_url FROM members WHERE id = ?"
+);
+$stmt->execute([$member_id]);
+$member = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$member) {
     echo '<div class="alert alert-danger">Member not found.</div>';
@@ -98,15 +102,28 @@ if (!$member) {
     exit();
 }
 
-// Initialize empty result arrays for borrowing history and reviews
-// Since this is using demo users, there's no database connection for these features
-class EmptyResult {
-    public $num_rows = 0;
-    public function fetch_assoc() { return null; }
-}
+// ---------- Borrowing history and reviews ----------
+$stmt = $conn->prepare(
+    "SELECT b.title, b.author, br.borrow_date, br.due_date, br.return_date, br.status
+     FROM borrowings br
+     JOIN books b ON b.id = br.book_id
+     WHERE br.member_id = ?
+     ORDER BY br.borrow_date DESC, br.id DESC"
+);
+$stmt->bind_param('i', $member_id);
+$stmt->execute();
+$borrowing_result = $stmt->get_result();
 
-$borrowing_result = new EmptyResult();
-$reviews_result = new EmptyResult();
+$stmt = $conn->prepare(
+    "SELECT b.title, b.author, r.rating, r.comment, r.created_at
+     FROM book_reviews r
+     JOIN books b ON b.id = r.book_id
+     WHERE r.member_id = ?
+     ORDER BY r.created_at DESC"
+);
+$stmt->bind_param('i', $member_id);
+$stmt->execute();
+$reviews_result = $stmt->get_result();
 ?>
 
 <div style="max-width: 1200px; margin: 0 auto;">
