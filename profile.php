@@ -81,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_avatar'])) {
     exit();
 }
 
+$page_title = 'Profile';
 include 'includes/header.php';
 
 // ---------- Which profile to show ----------
@@ -125,373 +126,303 @@ $stmt->bind_param('i', $member_id);
 $stmt->execute();
 $reviews_result = $stmt->get_result();
 ?>
+<?php
+$history = $borrowing_result->fetch_all(MYSQLI_ASSOC);
+$reviews = $reviews_result->fetch_all(MYSQLI_ASSOC);
+$on_loan = count(array_filter($history, fn($h) => $h['status'] === 'active'));
+$is_own = $member_id == $_SESSION['user_id'];
+$can_edit_photo = $role === 'admin' || $is_own;
+?>
 
-<div style="max-width: 1200px; margin: 0 auto;">
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 35px; margin: -20px -20px 30px -20px; border-radius: 0 0 20px 20px; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);">
-        <h1 style="color: white; margin: 0; display: flex; align-items: center; gap: 12px; font-size: 2rem; text-shadow: 0 2px 4px rgba(0,0,0,0.2);"><span style="font-size: 2.2rem;">👤</span> Member Profile</h1>
-    </div>
-    
-    <?php
-    // Display success/error messages
-    if (isset($_SESSION['success_message'])) {
-        echo '<div class="alert alert-success" style="border-radius: 12px; border-left: 4px solid #4CAF50; background: #e8f5e9; color: #2e7d32; padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);">' . htmlspecialchars($_SESSION['success_message']) . '</div>';
-        unset($_SESSION['success_message']);
+<?php if (!$is_own && $is_staff): ?>
+    <p style="margin-bottom: 14px;"><a href="members.php" class="muted" style="text-decoration: none;">&larr; Members</a></p>
+<?php endif; ?>
+
+<?php
+foreach (['success_message' => ['alert-success', 'check-circle'], 'error_message' => ['alert-danger', 'alert']] as $key => [$cls, $ic]) {
+    if (isset($_SESSION[$key])) {
+        echo '<div class="alert ' . $cls . '">' . icon($ic, 16) . htmlspecialchars($_SESSION[$key]) . '</div>';
+        unset($_SESSION[$key]);
     }
-    if (isset($_SESSION['error_message'])) {
-        echo '<div class="alert alert-danger" style="border-radius: 12px; border-left: 4px solid #f44336; background: #ffebee; color: #c62828; padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(244, 67, 54, 0.2);">' . htmlspecialchars($_SESSION['error_message']) . '</div>';
-        unset($_SESSION['error_message']);
-    }
-    ?>
-    
-    <!-- Profile Card -->
-    <div style="background: white; border-radius: 16px; padding: 40px; margin-bottom: 30px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
-        <div style="display: flex; align-items: center; gap: 30px; flex-wrap: wrap;">
-            <div style="position: relative;">
-            <?php
-            $avatar = $member['avatar_url'] ?? '';
-            if ($avatar) {
-                echo '<img src="' . htmlspecialchars($avatar) . '" alt="Avatar" style="width: 120px; height: 120px; border-radius: 50%; object-fit: cover; border: 4px solid #667eea; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">';
-            } else {
-                echo '<div style="width: 120px; height: 120px; border-radius: 50%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 3rem; font-weight: bold; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">' . strtoupper(substr($member['name'], 0, 1)) . '</div>';
-            }
-            // Show edit button for admin or user viewing their own profile
-            if ($_SESSION['role'] === 'admin' || $member_id == $_SESSION['user_id']) {
-                echo '<button onclick="openAvatarModal()" style="position: absolute; bottom: 0; right: 0; background: #667eea; color: white; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4); display: flex; align-items: center; justify-content: center; font-size: 1rem; transition: all 0.3s;" onmouseover="this.style.background=\'#764ba2\'; this.style.transform=\'scale(1.1)\'" onmouseout="this.style.background=\'#667eea\'; this.style.transform=\'scale(1)\'" title="Edit Picture">📷</button>';
-            }
-            ?>
-            </div>
-            <div style="flex: 1; min-width: 250px;">
-                <h2 style="margin: 0 0 15px 0; color: #333; font-size: 2rem;"><?php echo htmlspecialchars($member['name']); ?></h2>
-                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.5rem;">🎓</span>
-                    <div>
-                        <strong style="color: #555;">Class:</strong>
-                        <span style="color: #667eea; font-size: 1.15rem; font-weight: 600; margin-left: 8px;"><?php echo !empty($member['class']) ? htmlspecialchars($member['class']) : 'Not assigned'; ?></span>
-                    </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <span style="background: <?php echo $member['status'] === 'active' ? 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)' : 'linear-gradient(135deg, #f44336 0%, #e53935 100%)'; ?>; color: white; padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
-                        <?php echo $member['status'] === 'active' ? '✅ Active' : '❌ Inactive'; ?>
-                    </span>
-                    <span style="color: #666; display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 1.2rem;">📅</span>
-                        <span><strong>Member since:</strong> <?php echo date('M d, Y', strtotime($member['membership_date'])); ?></span>
-                    </span>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Password Change Button (only for own profile) -->
-        <?php if ($member_id == $_SESSION['user_id']): ?>
-        <div style="margin-top: 25px; padding-top: 25px; border-top: 2px solid #f0f0f0;">
-            <button onclick="openPasswordModal()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3); transition: all 0.3s; display: inline-flex; align-items: center; gap: 8px;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.3)'">
-                🔒 Change Password
-            </button>
-        </div>
-        <?php endif; ?>
-    </div>
+}
+?>
 
-    <!-- Borrowing History -->
-    <div style="background: white; border-radius: 12px; padding: 30px; margin-bottom: 30px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);">
-        <h2 style="margin-top: 0; color: #333; display: flex; align-items: center; gap: 10px;"><span style="font-size: 1.3rem;">📚</span> Borrowing History</h2>
-        <?php if ($borrowing_result->num_rows > 0): ?>
-        <div style="overflow-x: auto;">
-        <table class="table" style="width: 100%; border-collapse: collapse;">
-            <thead>
-                <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                    <th style="padding: 12px 15px; text-align: left; font-weight: 600; border-radius: 8px 0 0 0;">Book Title</th>
-                    <th style="padding: 12px 15px; text-align: left; font-weight: 600;">Author</th>
-                    <th style="padding: 12px 15px; text-align: left; font-weight: 600;">Borrowed</th>
-                    <th style="padding: 12px 15px; text-align: left; font-weight: 600;">Due Date</th>
-                    <th style="padding: 12px 15px; text-align: left; font-weight: 600;">Returned</th>
-                    <th style="padding: 12px 15px; text-align: center; font-weight: 600; border-radius: 0 8px 0 0;">Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php while ($borrow = $borrowing_result->fetch_assoc()): ?>
-                <tr style="border-bottom: 1px solid #f0f0f0; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa'" onmouseout="this.style.background=''">
-                    <td style="padding: 15px; font-weight: 500; color: #333;"><?php echo htmlspecialchars($borrow['title']); ?></td>
-                    <td style="padding: 15px; color: #666;"><?php echo htmlspecialchars($borrow['author']); ?></td>
-                    <td style="padding: 15px; color: #666;"><?php echo date('M d, Y', strtotime($borrow['borrow_date'])); ?></td>
-                    <td style="padding: 15px; color: #666;"><?php echo date('M d, Y', strtotime($borrow['due_date'])); ?></td>
-                    <td style="padding: 15px; color: #666;"><?php echo $borrow['return_date'] ? date('M d, Y', strtotime($borrow['return_date'])) : '<span style="color: #999;">-</span>'; ?></td>
-                    <td style="padding: 15px; text-align: center;">
-                        <?php 
-                        if ($borrow['status'] === 'returned') {
-                            echo '<span style="background: #4CAF50; color: white; padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;"><span>✅</span> Returned</span>';
-                        } else {
-                            $overdue = strtotime($borrow['due_date']) < time();
-                            if ($overdue) {
-                                echo '<span style="background: #f44336; color: white; padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;"><span>⚠️</span> Overdue</span>';
-                            } else {
-                                echo '<span style="background: #2196F3; color: white; padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;"><span>📖</span> Active</span>';
-                            }
-                        }
-                        ?>
-                    </td>
-                </tr>
-                <?php endwhile; ?>
-            </tbody>
-        </table>
-        </div>
-        <?php else: ?>
-        <div style="text-align: center; padding: 40px 20px; color: #999; background: #f8f9fa; border-radius: 8px;">
-            <div style="font-size: 3rem; margin-bottom: 10px;">📚</div>
-            <p style="margin: 0; font-size: 1.1rem;">No borrowing history found.</p>
-        </div>
-        <?php endif; ?>
-    </div>
-
-    <!-- Reviews -->
-    <div style="background: white; border-radius: 16px; padding: 35px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
-        <h2 style="margin-top: 0; color: #333; display: flex; align-items: center; gap: 10px; font-size: 1.75rem;"><span style="font-size: 1.5rem;">⭐</span> Book Reviews</h2>
-        <?php if ($reviews_result->num_rows > 0): ?>
-        <div style="display: grid; gap: 20px;">
-            <?php while ($review = $reviews_result->fetch_assoc()): ?>
-            <div style="border: 1px solid #e0e0e0; border-radius: 12px; padding: 20px; background: linear-gradient(to bottom, #ffffff 0%, #f8f9fa 100%); transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,0,0,0.05);" onmouseover="this.style.boxShadow='0 4px 16px rgba(102, 126, 234, 0.15)'; this.style.borderColor='#667eea'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.05)'; this.style.borderColor='#e0e0e0'">
-                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px; gap: 15px;">
-                    <div style="flex: 1;">
-                        <strong style="color: #333; font-size: 1.15rem; display: block; margin-bottom: 5px;"><?php echo htmlspecialchars($review['title']); ?></strong>
-                        <div style="color: #666; font-size: 0.95rem; display: flex; align-items: center; gap: 5px;">
-                            <span style="font-size: 1rem;">✍️</span>
-                            <span>by <?php echo htmlspecialchars($review['author']); ?></span>
-                        </div>
-                    </div>
-                    <div style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); color: white; padding: 8px 14px; border-radius: 20px; font-size: 1.1rem; box-shadow: 0 2px 8px rgba(243, 156, 18, 0.3); white-space: nowrap;">
-                        <?php echo str_repeat('⭐', $review['rating']); ?>
-                    </div>
-                </div>
-                <?php if (!empty($review['comment'])): ?>
-                <p style="margin: 12px 0; color: #555; line-height: 1.6; padding: 12px; background: white; border-radius: 8px; border-left: 3px solid #667eea;"><?php echo htmlspecialchars($review['comment']); ?></p>
+<div class="page-header">
+    <div class="page-header-person">
+        <div class="profile-avatar">
+            <span class="avatar avatar-xl">
+                <?php if (!empty($member['avatar_url'])): ?>
+                    <img src="<?php echo htmlspecialchars($member['avatar_url']); ?>" alt="">
+                <?php else: ?>
+                    <?php echo htmlspecialchars(strtoupper(substr($member['name'], 0, 1))); ?>
                 <?php endif; ?>
-                <div style="display: flex; align-items: center; gap: 6px; margin-top: 10px;">
-                    <span style="font-size: 1rem;">📅</span>
-                    <small style="color: #999; font-size: 0.9rem;"><?php echo date('M d, Y', strtotime($review['created_at'])); ?></small>
-                </div>
-            </div>
-            <?php endwhile; ?>
+            </span>
+            <?php if ($can_edit_photo): ?>
+                <button type="button" class="avatar-edit" onclick="openAvatarModal()" title="Change photo" aria-label="Change photo"><?php echo icon('plus', 14); ?></button>
+            <?php endif; ?>
         </div>
-        <?php else: ?>
-        <div style="text-align: center; padding: 50px 20px; color: #999; background: #f8f9fa; border-radius: 12px;">
-            <div style="font-size: 4rem; margin-bottom: 15px; opacity: 0.5;">⭐</div>
-            <p style="margin: 0; font-size: 1.15rem; font-weight: 500;">No reviews yet.</p>
-            <p style="margin: 8px 0 0 0; font-size: 0.95rem; color: #bbb;">Reviews will appear here once submitted.</p>
+        <div>
+            <h1><?php echo htmlspecialchars($member['name']); ?></h1>
+            <p class="meta-line">
+                <span><?php echo !empty($member['class']) ? htmlspecialchars($member['class']) : 'No class set'; ?></span>
+                <span>Member since <?php echo date('F Y', strtotime($member['membership_date'] ?? 'now')); ?></span>
+                <?php if ($member['status'] === 'active'): ?>
+                    <span class="badge badge-success">Active</span>
+                <?php else: ?>
+                    <span class="badge badge-neutral">Inactive</span>
+                <?php endif; ?>
+            </p>
         </div>
-        <?php endif; ?>
+    </div>
+    <?php if ($is_own): ?>
+        <button class="btn btn-outline" onclick="openPasswordModal()">Change password</button>
+    <?php endif; ?>
+</div>
+
+<div class="stats-strip stats-3">
+    <div class="stat">
+        <div class="stat-label"><?php echo icon('book', 15); ?>Borrowed</div>
+        <div class="stat-value"><?php echo count($history); ?></div>
+        <div class="stat-note">books in total</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label"><?php echo icon('book-open', 15); ?>On loan</div>
+        <div class="stat-value"><?php echo $on_loan; ?></div>
+        <div class="stat-note">right now</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label"><?php echo icon('star', 15); ?>Reviews</div>
+        <div class="stat-value"><?php echo count($reviews); ?></div>
+        <div class="stat-note">books rated</div>
     </div>
 </div>
 
-<!-- Avatar Upload Modal (Admin and Users viewing own profile) -->
-<?php if ($_SESSION['role'] === 'admin' || $member_id == $_SESSION['user_id']): ?>
-<div id="avatarModal" class="modal">
-    <div class="modal-content" style="border-radius: 16px; max-width: 600px; padding: 0; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px 30px; position: relative;">
-            <h2 style="margin: 0; color: white; display: flex; align-items: center; gap: 10px; font-size: 1.6rem;">📷 Edit Profile Photo</h2>
-            <span class="modal-close" onclick="closeAvatarModal()" style="position: absolute; top: 20px; right: 25px; color: white; font-size: 2rem; opacity: 0.9; cursor: pointer;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">&times;</span>
+<section class="panel" style="margin-bottom: 24px;">
+    <div class="panel-header">
+        <h2><?php echo icon('clock', 17); ?>Borrowing history <span class="count"><?php echo count($history); ?></span></h2>
+    </div>
+    <?php if ($history): ?>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Book</th>
+                        <th class="hide-sm">Borrowed</th>
+                        <th>Due</th>
+                        <th class="hide-sm">Returned</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($history as $h):
+                        $late = $h['status'] === 'active' && strtotime($h['due_date']) < strtotime('today');
+                    ?>
+                        <tr class="<?php echo $late ? 'is-overdue' : ''; ?>">
+                            <td>
+                                <div class="cell-main"><?php echo htmlspecialchars($h['title']); ?></div>
+                                <div class="cell-sub"><?php echo htmlspecialchars($h['author']); ?></div>
+                            </td>
+                            <td class="muted hide-sm nowrap"><?php echo date('M j, Y', strtotime($h['borrow_date'])); ?></td>
+                            <td class="muted nowrap"><?php echo date('M j, Y', strtotime($h['due_date'])); ?></td>
+                            <td class="muted hide-sm nowrap"><?php echo $h['return_date'] ? date('M j, Y', strtotime($h['return_date'])) : '—'; ?></td>
+                            <td>
+                                <?php if ($h['status'] === 'returned'): ?>
+                                    <span class="badge badge-neutral">Returned</span>
+                                <?php elseif ($late): ?>
+                                    <span class="badge badge-danger">Overdue</span>
+                                <?php else: ?>
+                                    <span class="badge badge-success">On loan</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
         </div>
-        <form id="avatarForm" method="POST" enctype="multipart/form-data" style="padding: 30px;">
-            <input type="hidden" name="update_avatar" value="1">
-            <?php if ($_SESSION['role'] === 'admin'): ?>
-            <input type="hidden" name="member_id" value="<?php echo $member_id; ?>">
-            <?php endif; ?>
-            
-            <div class="form-group">
-                <label style="font-weight: 600; color: #333; margin-bottom: 12px; display: block; font-size: 1.05rem;">Photo Source</label>
-                <div style="display:flex; gap:15px; flex-wrap:wrap; align-items:center; margin-bottom:15px;">
-                    <label style="display:flex; align-items:center; gap:8px; cursor: pointer; padding: 10px 16px; border: 2px solid #667eea; border-radius: 10px; background: white; transition: all 0.3s;" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background='white'">
-                        <input type="radio" name="avatar_source" id="avatar_source_upload" value="upload" checked style="width: 18px; height: 18px; cursor: pointer;">
-                        <span style="font-weight: 500;">📁 Upload from computer</span>
-                    </label>
-                    <label style="display:flex; align-items:center; gap:8px; cursor: pointer; padding: 10px 16px; border: 2px solid #667eea; border-radius: 10px; background: white; transition: all 0.3s;" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background='white'">
-                        <input type="radio" name="avatar_source" id="avatar_source_url" value="url" style="width: 18px; height: 18px; cursor: pointer;">
-                        <span style="font-weight: 500;">🔗 Use a URL/link</span>
-                    </label>
-                </div>
-                
-                <div id="avatarUploadContainer">
-                    <input type="file" id="avatar_file" name="avatar_file" accept="image/*" style="padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; width: 100%; font-size: 0.95rem;">
-                    <small style="color:#666; display: block; margin-top: 8px; line-height: 1.5;">Accepted formats: JPG, PNG, WEBP, GIF. Max 5MB. <strong style="color: #667eea;">Or paste (Ctrl+V) below</strong></small>
-                    <div id="avatarPasteZone" style="margin-top:12px; padding:30px 20px; border:2px dashed #667eea; border-radius:12px; text-align:center; color:#667eea; background:#f0f4ff; cursor: pointer; transition: all 0.3s; font-weight: 500;" onmouseover="this.style.borderColor='#764ba2'; this.style.background='#e8e4ff'" onmouseout="this.style.borderColor='#667eea'; this.style.background='#f0f4ff'">
-                        📋 Click here and press Ctrl+V to paste an image or screenshot
+    <?php else: ?>
+        <div class="empty">
+            <strong>No books borrowed yet</strong>
+            <?php echo $is_own ? 'Find a book in the catalogue and ask the librarian to check it out.' : 'This student has not borrowed anything yet.'; ?>
+        </div>
+    <?php endif; ?>
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <h2><?php echo icon('star', 17); ?>Reviews <span class="count"><?php echo count($reviews); ?></span></h2>
+    </div>
+    <?php if ($reviews): ?>
+        <ul class="review-list">
+            <?php foreach ($reviews as $rv): ?>
+                <li class="review">
+                    <div class="review-head">
+                        <div>
+                            <div class="cell-main"><?php echo htmlspecialchars($rv['title']); ?></div>
+                            <div class="cell-sub"><?php echo htmlspecialchars($rv['author']); ?> · <?php echo date('M j, Y', strtotime($rv['created_at'])); ?></div>
+                        </div>
+                        <span class="stars" aria-label="<?php echo (int)$rv['rating']; ?> out of 5">
+                            <?php for ($i = 1; $i <= 5; $i++) { echo icon('star', 15, $i <= $rv['rating'] ? 'filled' : ''); } ?>
+                        </span>
                     </div>
+                    <?php if (!empty($rv['comment'])): ?>
+                        <p class="review-text"><?php echo nl2br(htmlspecialchars($rv['comment'])); ?></p>
+                    <?php endif; ?>
+                </li>
+            <?php endforeach; ?>
+        </ul>
+    <?php else: ?>
+        <div class="empty">
+            <strong>No reviews yet</strong>
+            <?php echo $is_own ? 'Rate a book from its page in the catalogue.' : 'This student has not reviewed any books.'; ?>
+        </div>
+    <?php endif; ?>
+</section>
+
+<?php if ($can_edit_photo): ?>
+<!-- Change photo -->
+<div id="avatarModal" class="modal">
+    <div class="modal-content has-parts modal-sm">
+        <div class="modal-header">
+            <h2>Change photo</h2>
+            <button type="button" class="icon-button" onclick="closeAvatarModal()" aria-label="Close"><?php echo icon('x', 18); ?></button>
+        </div>
+        <form id="avatarForm" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="update_avatar" value="1">
+            <?php if ($role === 'admin'): ?>
+                <input type="hidden" name="member_id" value="<?php echo (int)$member_id; ?>">
+            <?php endif; ?>
+            <input type="hidden" name="avatar_source" id="avatar_source" value="upload">
+            <div class="modal-body">
+                <div class="segmented" style="margin-bottom: 16px;">
+                    <button type="button" class="active" data-src="upload" onclick="setAvatarSource('upload')">Upload a file</button>
+                    <button type="button" data-src="url" onclick="setAvatarSource('url')">Use a link</button>
                 </div>
-                
-                <div id="avatarUrlContainer" style="display:none;">
-                    <input type="url" id="avatar_url" name="avatar_url" placeholder="https://example.com/photo.jpg" style="padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; width: 100%; font-size: 0.95rem;">
-                    <small style="color:#666; display: block; margin-top: 8px;">Provide a direct image link (JPG/PNG/WebP/GIF).</small>
+
+                <div id="avatarUploadContainer">
+                    <div class="form-group">
+                        <input type="file" id="avatar_file" name="avatar_file" accept="image/*" class="input">
+                        <p class="form-hint">JPG, PNG, WEBP or GIF, up to 5 MB.</p>
+                    </div>
+                    <div id="avatarPasteZone" class="paste-zone" tabindex="0">Or click here and paste an image (Ctrl+V)</div>
                 </div>
-                
-                <div id="avatarPreview" style="margin-top:20px; display:none; text-align:center; padding: 20px; background: #f8f9fa; border-radius: 12px;">
-                    <img id="avatarPreviewImg" src="" alt="Avatar preview" style="max-height:200px; border-radius:50%; border:4px solid #667eea; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">
+
+                <div id="avatarUrlContainer" class="form-group" style="display: none;">
+                    <input type="url" id="avatar_url" name="avatar_url" class="input" placeholder="https://example.com/photo.jpg">
+                    <p class="form-hint">A direct link to an image.</p>
+                </div>
+
+                <div id="avatarPreview" class="photo-preview" style="display: none;">
+                    <span class="avatar avatar-xl"><img id="avatarPreviewImg" src="" alt="Preview"></span>
                 </div>
             </div>
-            
-            <div style="display: flex; gap: 12px; margin-top: 25px;">
-                <button type="submit" class="btn btn-primary" style="flex: 1; padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 10px; color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.3)'">💾 Save Photo</button>
-                <button type="button" class="btn btn-secondary" onclick="closeAvatarModal()" style="padding: 12px 24px; background: #e0e0e0; border: none; border-radius: 10px; color: #666; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s;" onmouseover="this.style.background='#d0d0d0'" onmouseout="this.style.background='#e0e0e0'">Cancel</button>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline" onclick="closeAvatarModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save photo</button>
             </div>
         </form>
     </div>
 </div>
 
 <script>
-// Avatar source toggle
-document.getElementById('avatar_source_upload')?.addEventListener('change', () => {
-    document.getElementById('avatarUploadContainer').style.display = '';
-    document.getElementById('avatarUrlContainer').style.display = 'none';
-    document.getElementById('avatar_url').value = '';
-});
-document.getElementById('avatar_source_url')?.addEventListener('change', () => {
-    document.getElementById('avatarUploadContainer').style.display = 'none';
-    document.getElementById('avatarUrlContainer').style.display = '';
-    document.getElementById('avatar_file').value = '';
-    const avatarPrev = document.getElementById('avatarPreview');
-    if (avatarPrev) avatarPrev.style.display = 'none';
-});
-
-const avatarFileInput = document.getElementById('avatar_file');
-const avatarUrlInput = document.getElementById('avatar_url');
 const avatarPrev = document.getElementById('avatarPreview');
 const avatarPrevImg = document.getElementById('avatarPreviewImg');
-
-avatarFileInput?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = () => {
-            avatarPrevImg.src = reader.result;
-            avatarPrev.style.display = 'block';
-        };
-        reader.readAsDataURL(file);
-    } else {
-        avatarPrev.style.display = 'none';
-        avatarPrevImg.src = '';
-    }
-});
-
-avatarUrlInput?.addEventListener('input', (e) => {
-    const url = e.target.value.trim();
-    if (url) {
-        avatarPrevImg.src = url;
-        avatarPrev.style.display = 'block';
-    } else {
-        avatarPrev.style.display = 'none';
-        avatarPrevImg.src = '';
-    }
-});
-
-// Clipboard paste support
 const avatarPasteZone = document.getElementById('avatarPasteZone');
 let avatarPastedFile = null;
 
-avatarPasteZone?.addEventListener('paste', (e) => {
-    e.preventDefault();
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    
-    for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-            const blob = items[i].getAsFile();
-            if (blob) {
-                avatarPastedFile = new File([blob], `avatar-pasted-${Date.now()}.png`, { type: blob.type });
-                
-                const reader = new FileReader();
-                reader.onload = () => {
-                    avatarPrevImg.src = reader.result;
-                    avatarPrev.style.display = 'block';
-                    avatarPasteZone.style.borderColor = '#4CAF50';
-                    avatarPasteZone.style.background = '#e8f5e9';
-                    avatarPasteZone.innerHTML = '✅ Image pasted! Ready to save.';
-                };
-                reader.readAsDataURL(blob);
-            }
-            break;
-        }
-    }
+function showPreview(src) {
+    avatarPrevImg.src = src || '';
+    avatarPrev.style.display = src ? 'flex' : 'none';
+}
+
+function setAvatarSource(src) {
+    document.getElementById('avatar_source').value = src;
+    document.querySelectorAll('#avatarModal .segmented button').forEach(b => b.classList.toggle('active', b.dataset.src === src));
+    document.getElementById('avatarUploadContainer').style.display = src === 'upload' ? '' : 'none';
+    document.getElementById('avatarUrlContainer').style.display = src === 'url' ? '' : 'none';
+    showPreview(null);
+}
+
+document.getElementById('avatar_file').addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    avatarPastedFile = null;
+    if (!file) return showPreview(null);
+    const reader = new FileReader();
+    reader.onload = () => showPreview(reader.result);
+    reader.readAsDataURL(file);
 });
 
-avatarPasteZone?.setAttribute('tabindex', '0');
-avatarPasteZone?.addEventListener('click', () => avatarPasteZone.focus());
+document.getElementById('avatar_url').addEventListener('input', e => showPreview(e.target.value.trim()));
 
-// Form submission with pasted file support
-document.getElementById('avatarForm')?.addEventListener('submit', (e) => {
-    const sourceEl = document.querySelector('input[name="avatar_source"]:checked');
-    if (avatarPastedFile && sourceEl?.value === 'upload') {
+avatarPasteZone.addEventListener('paste', e => {
+    e.preventDefault();
+    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image'));
+    if (!item) return;
+    const blob = item.getAsFile();
+    avatarPastedFile = new File([blob], 'avatar-pasted-' + Date.now() + '.png', { type: blob.type });
+    const reader = new FileReader();
+    reader.onload = () => {
+        showPreview(reader.result);
+        avatarPasteZone.classList.add('done');
+        avatarPasteZone.textContent = 'Image pasted. Click Save photo.';
+    };
+    reader.readAsDataURL(blob);
+});
+
+document.getElementById('avatarForm').addEventListener('submit', e => {
+    if (avatarPastedFile && document.getElementById('avatar_source').value === 'upload') {
         e.preventDefault();
         const formData = new FormData(e.target);
         formData.set('avatar_file', avatarPastedFile);
-        
         fetch('profile.php', { method: 'POST', body: formData })
-        .then(() => window.location.reload())
-        .catch(() => alert('Error uploading avatar.'));
+            .then(() => window.location.reload())
+            .catch(() => alert('Could not upload the photo.'));
     }
 });
 
 function openAvatarModal() {
-    document.getElementById('avatarModal').style.display = 'block';
+    document.getElementById('avatarForm').reset();
     avatarPastedFile = null;
-    
-    const avatarPrev = document.getElementById('avatarPreview');
-    if (avatarPrev) avatarPrev.style.display = 'none';
-    
-    const pasteZone = document.getElementById('avatarPasteZone');
-    if (pasteZone) {
-        pasteZone.style.borderColor = '#667eea';
-        pasteZone.style.background = '#f0f4ff';
-        pasteZone.innerHTML = '📋 Click here and press Ctrl+V to paste an image or screenshot';
-    }
-    
-    const uploadRadio = document.getElementById('avatar_source_upload');
-    if (uploadRadio) {
-        uploadRadio.checked = true;
-        document.getElementById('avatarUploadContainer').style.display = '';
-        document.getElementById('avatarUrlContainer').style.display = 'none';
-    }
+    avatarPasteZone.classList.remove('done');
+    avatarPasteZone.textContent = 'Or click here and paste an image (Ctrl+V)';
+    setAvatarSource('upload');
+    document.getElementById('avatarModal').style.display = 'block';
 }
 
 function closeAvatarModal() {
     document.getElementById('avatarModal').style.display = 'none';
-    document.getElementById('avatarForm').reset();
-}
-
-window.onclick = function(event) {
-    const modal = document.getElementById('avatarModal');
-    if (event.target == modal) {
-        closeAvatarModal();
-    }
 }
 </script>
 <?php endif; ?>
 
-<!-- Password Change Modal -->
-<div id="passwordModal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0, 0, 0, 0.5);">
-    <div class="modal-content" style="background-color: white; margin: 10% auto; padding: 0; border-radius: 16px; width: 90%; max-width: 500px; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3); overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px 30px; position: relative;">
-            <h2 style="margin: 0; color: white; display: flex; align-items: center; gap: 10px; font-size: 1.6rem;">🔒 Change Password</h2>
-            <span class="modal-close" onclick="closePasswordModal()" style="position: absolute; top: 20px; right: 25px; color: white; font-size: 2rem; opacity: 0.9; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">&times;</span>
+<?php if ($is_own): ?>
+<!-- Change password -->
+<div id="passwordModal" class="modal">
+    <div class="modal-content has-parts modal-sm">
+        <div class="modal-header">
+            <h2>Change password</h2>
+            <button type="button" class="icon-button" onclick="closePasswordModal()" aria-label="Close"><?php echo icon('x', 18); ?></button>
         </div>
-        <form method="POST" action="" id="passwordForm" style="padding: 30px;">
+        <form method="POST" action="" id="passwordForm">
             <input type="hidden" name="change_password" value="1">
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label for="current_password" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Current Password *</label>
-                <input type="password" id="current_password" name="current_password" required style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="current_password">Current password</label>
+                    <input type="password" id="current_password" name="current_password" required autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label for="new_password">New password</label>
+                    <input type="password" id="new_password" name="new_password" required minlength="6" autocomplete="new-password">
+                    <p class="form-hint">At least 6 characters.</p>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="confirm_password">Repeat new password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required minlength="6" autocomplete="new-password">
+                    <p class="form-hint" id="passwordError" style="color: var(--danger); display: none;">The new passwords don't match.</p>
+                </div>
             </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label for="new_password" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">New Password *</label>
-                <input type="password" id="new_password" name="new_password" required minlength="6" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
-                <small style="color: #777; display: block; margin-top: 5px;">At least 6 characters</small>
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label for="confirm_password" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Confirm New Password *</label>
-                <input type="password" id="confirm_password" name="confirm_password" required minlength="6" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
-            </div>
-            
-            <div style="display: flex; gap: 12px; margin-top: 25px;">
-                <button type="submit" class="btn btn-primary" style="flex: 1; padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 10px; color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.3)'">🔒 Change Password</button>
-                <button type="button" class="btn btn-secondary" onclick="closePasswordModal()" style="padding: 12px 24px; background: #e0e0e0; border: none; border-radius: 10px; color: #666; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s;" onmouseover="this.style.background='#d0d0d0'" onmouseout="this.style.background='#e0e0e0'">Cancel</button>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline" onclick="closePasswordModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Change password</button>
             </div>
         </form>
     </div>
@@ -499,40 +430,22 @@ window.onclick = function(event) {
 
 <script>
 function openPasswordModal() {
+    document.getElementById('passwordForm').reset();
+    document.getElementById('passwordError').style.display = 'none';
     document.getElementById('passwordModal').style.display = 'block';
+    setTimeout(() => document.getElementById('current_password').focus(), 50);
 }
 
 function closePasswordModal() {
     document.getElementById('passwordModal').style.display = 'none';
-    document.getElementById('passwordForm').reset();
 }
 
-// Close modal when clicking outside
-window.addEventListener('click', function(event) {
-    const passwordModal = document.getElementById('passwordModal');
-    if (event.target == passwordModal) {
-        closePasswordModal();
-    }
-});
-
-// Close modal on ESC key
-document.addEventListener('keydown', function(event) {
-    if (event.key === 'Escape') {
-        closePasswordModal();
-    }
-});
-
-// Validate password confirmation
-document.getElementById('passwordForm')?.addEventListener('submit', function(e) {
-    const newPass = document.getElementById('new_password').value;
-    const confirmPass = document.getElementById('confirm_password').value;
-    
-    if (newPass !== confirmPass) {
-        e.preventDefault();
-        alert('New passwords do not match!');
-        return false;
-    }
+document.getElementById('passwordForm').addEventListener('submit', e => {
+    const mismatch = document.getElementById('new_password').value !== document.getElementById('confirm_password').value;
+    document.getElementById('passwordError').style.display = mismatch ? 'block' : 'none';
+    if (mismatch) e.preventDefault();
 });
 </script>
+<?php endif; ?>
 
 <?php include 'includes/footer.php'; ?>

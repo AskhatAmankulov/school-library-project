@@ -1,299 +1,108 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to Library System</title>
-    <link rel="stylesheet" href="css/style.css">
-    <style>
-        .hero {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 80px 20px;
-            text-align: center;
-            border-radius: 10px;
-            margin: 40px 0;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-        .hero h1 {
-            font-size: 3rem;
-            margin-bottom: 20px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-        .hero p {
-            font-size: 1.3rem;
-            margin-bottom: 30px;
-            opacity: 0.95;
-        }
-        .hero .cta-buttons {
-            display: flex;
-            gap: 20px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        .hero .cta-btn {
-            background: white;
-            color: #667eea;
-            padding: 15px 40px;
-            border-radius: 30px;
-            text-decoration: none;
-            font-weight: bold;
-            font-size: 1.1rem;
-            transition: transform 0.3s, box-shadow 0.3s;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-        .hero .cta-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
-        }
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 30px;
-            margin: 50px 0;
-        }
-        .feature-card {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            text-align: center;
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-        }
-        .feature-card .icon {
-            font-size: 4rem;
-            margin-bottom: 15px;
-        }
-        .feature-card h3 {
-            color: #667eea;
-            margin-bottom: 10px;
-        }
-        .feature-card p {
-            color: #666;
-            line-height: 1.6;
-        }
-        .stats {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-            padding: 50px 20px;
-            border-radius: 10px;
-            margin: 50px 0;
-            text-align: center;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 30px;
-            margin-top: 30px;
-        }
-        .stat-item {
-            background: rgba(255,255,255,0.15);
-            padding: 25px;
-            border-radius: 10px;
-            backdrop-filter: blur(10px);
-        }
-        .stat-item .number {
-            font-size: 2.5rem;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-        .stat-item .label {
-            font-size: 1.1rem;
-            opacity: 0.9;
-        }
-        .testimonials {
-            margin: 60px 0;
-            text-align: center;
-        }
-        .testimonial-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 30px;
-            margin-top: 30px;
-        }
-        .testimonial {
-            background: #f8f9fa;
-            padding: 25px;
-            border-radius: 10px;
-            border-left: 4px solid #667eea;
-        }
-        .testimonial .quote {
-            font-style: italic;
-            color: #555;
-            margin-bottom: 15px;
-        }
-        .testimonial .author {
-            font-weight: bold;
-            color: #667eea;
-        }
-        .nav-simple {
-            background: #667eea;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .nav-simple .logo {
-            color: white;
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-        .nav-simple .login-btn {
-            background: white;
-            color: #667eea;
-            padding: 10px 25px;
-            border-radius: 20px;
-            text-decoration: none;
-            font-weight: bold;
-            transition: transform 0.3s;
-        }
-        .nav-simple .login-btn:hover {
-            transform: scale(1.05);
-        }
-    </style>
-</head>
-<body>
-    <div class="nav-simple">
-        <div class="logo">📚 Library Management System</div>
-        <a href="login.php" class="login-btn">Login / Get Started</a>
+<?php
+session_start();
+include 'config.php';
+
+// Real numbers and a peek at the shelf (nothing is made up if the database is empty)
+$stats = ['books' => 0, 'students' => 0, 'reviews' => 0];
+$shelf = [];
+if (!$db_error && $conn) {
+    $stats['books'] = (int)$conn->query("SELECT COUNT(*) FROM books")->fetch_row()[0];
+    $stats['students'] = (int)$conn->query("SELECT COUNT(*) FROM members WHERE status = 'active'")->fetch_row()[0];
+    $stats['reviews'] = (int)$conn->query("SELECT COUNT(*) FROM book_reviews")->fetch_row()[0];
+    $res = $conn->query("SELECT b.title, b.author, b.cover_url, b.available_quantity, b.quantity,
+                                COALESCE(AVG(r.rating), 0) AS avg_rating
+                         FROM books b
+                         LEFT JOIN book_reviews r ON r.book_id = b.id
+                         GROUP BY b.id
+                         ORDER BY COUNT(r.id) DESC, b.title
+                         LIMIT 4");
+    if ($res) {
+        $shelf = $res->fetch_all(MYSQLI_ASSOC);
+    }
+}
+
+$page_title = 'Welcome';
+$hide_nav = true;
+include 'includes/header.php';
+$logged_in = isset($_SESSION['user_id']);
+?>
+
+<header class="landing-top">
+    <span class="logo">
+        <span class="logo-mark"><?php echo icon('library', 17); ?></span>
+        School Library
+    </span>
+    <?php if ($logged_in): ?>
+        <a href="index.php" class="btn btn-outline btn-small">Open the library</a>
+    <?php else: ?>
+        <a href="login.php" class="btn btn-outline btn-small">Log in</a>
+    <?php endif; ?>
+</header>
+
+<section class="landing-hero">
+    <div class="landing-copy">
+        <h1>The school library, open on any screen.</h1>
+        <p>Look up a book, see whether a copy is on the shelf and where to find it, and keep track of what you've borrowed and when it's due.</p>
+        <div class="landing-actions">
+            <?php if ($logged_in): ?>
+                <a href="index.php" class="btn btn-primary">Go to your dashboard</a>
+            <?php else: ?>
+                <a href="register.php" class="btn btn-primary">Create a student account</a>
+                <a href="login.php" class="btn btn-outline">Log in</a>
+            <?php endif; ?>
+        </div>
+        <p class="landing-stats">
+            <span><strong><?php echo $stats['books']; ?></strong> titles</span>
+            <span><strong><?php echo $stats['students']; ?></strong> readers</span>
+            <span><strong><?php echo $stats['reviews']; ?></strong> reviews</span>
+        </p>
     </div>
-    
-    <div class="container" style="max-width: 1200px; margin: 0 auto; padding: 0 20px;">
-        
-        <div class="hero">
-            <h1>📚 Welcome to Our Modern Library</h1>
-            <p>Manage your books, members, and borrowings all in one place. Experience seamless library management with powerful features and an intuitive interface.</p>
-            <div class="cta-buttons">
-                <a href="login.php" class="cta-btn">🚀 Get Started</a>
-                <a href="#features" class="cta-btn">📖 Learn More</a>
-            </div>
+
+    <?php if ($shelf): ?>
+        <div class="landing-shelf panel" aria-label="Most reviewed books">
+            <div class="panel-header"><h2>Most reviewed right now</h2></div>
+            <ul class="reading-list">
+                <?php foreach ($shelf as $b): ?>
+                    <li class="reading-item">
+                        <span class="cover">
+                            <?php echo icon('book', 18); ?>
+                            <?php if (!empty($b['cover_url'])): ?>
+                                <img src="<?php echo htmlspecialchars($b['cover_url']); ?>" alt="" onerror="this.remove()">
+                            <?php endif; ?>
+                        </span>
+                        <div class="info">
+                            <div class="title"><?php echo htmlspecialchars($b['title']); ?></div>
+                            <div class="author"><?php echo htmlspecialchars($b['author']); ?></div>
+                        </div>
+                        <?php if ($b['available_quantity'] > 0): ?>
+                            <span class="badge badge-success"><?php echo (int)$b['available_quantity']; ?> on the shelf</span>
+                        <?php else: ?>
+                            <span class="badge badge-neutral">All out</span>
+                        <?php endif; ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
         </div>
+    <?php endif; ?>
+</section>
 
-        <div id="features" class="features">
-            <div class="feature-card">
-                <div class="icon">📚</div>
-                <h3>Book Management</h3>
-                <p>Organize your entire collection with cover images, locations, ratings, and detailed information for each book.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">👥</div>
-                <h3>Member Profiles</h3>
-                <p>Track member information, borrowing history, reviews, and activity with comprehensive member profiles.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">📖</div>
-                <h3>Smart Borrowing</h3>
-                <p>Streamline the borrowing process with automated tracking, due date alerts, and overdue notifications.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">⭐</div>
-                <h3>Book Reviews</h3>
-                <p>Members can rate and review books, helping others discover great reads and share their thoughts.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">📊</div>
-                <h3>Dashboard Analytics</h3>
-                <p>Get real-time insights with comprehensive statistics on books, members, borrowings, and overdue items.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🔍</div>
-                <h3>Advanced Search</h3>
-                <p>Find books quickly with powerful sorting and filtering by title, author, rating, and availability.</p>
-            </div>
-        </div>
-
-        <?php
-        // Fetch real stats if database is available
-        $total_books = 500;
-        $total_members = 250;
-        $active_borrowings = 150;
-        $total_reviews = 320;
-        
-        if (file_exists('config.php')) {
-            include 'config.php';
-            if (!$db_error && $conn) {
-                $books_result = $conn->query("SELECT COUNT(*) as count FROM books");
-                if ($books_result) {
-                    $total_books = $books_result->fetch_assoc()['count'];
-                }
-                
-                $members_result = $conn->query("SELECT COUNT(*) as count FROM members");
-                if ($members_result) {
-                    $total_members = $members_result->fetch_assoc()['count'];
-                }
-                
-                $borrowings_result = $conn->query("SELECT COUNT(*) as count FROM borrowings WHERE status='active'");
-                if ($borrowings_result) {
-                    $active_borrowings = $borrowings_result->fetch_assoc()['count'];
-                }
-                
-                $reviews_result = $conn->query("SELECT COUNT(*) as count FROM book_reviews");
-                if ($reviews_result) {
-                    $total_reviews = $reviews_result->fetch_assoc()['count'];
-                }
-            }
-        }
-        ?>
-
-        <div class="stats">
-            <h2>📈 Our Library in Numbers</h2>
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <div class="number"><?php echo number_format($total_books); ?></div>
-                    <div class="label">Books in Collection</div>
-                </div>
-                <div class="stat-item">
-                    <div class="number"><?php echo number_format($total_members); ?></div>
-                    <div class="label">Active Members</div>
-                </div>
-                <div class="stat-item">
-                    <div class="number"><?php echo number_format($active_borrowings); ?></div>
-                    <div class="label">Active Borrowings</div>
-                </div>
-                <div class="stat-item">
-                    <div class="number"><?php echo number_format($total_reviews); ?></div>
-                    <div class="label">Book Reviews</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="testimonials">
-            <h2>💬 What Our Users Say</h2>
-            <div class="testimonial-grid">
-                <div class="testimonial">
-                    <div class="quote">"This library system has transformed how we manage our collection. The interface is intuitive and the features are exactly what we needed!"</div>
-                    <div class="author">— Sarah Johnson, Librarian</div>
-                </div>
-                <div class="testimonial">
-                    <div class="quote">"I love being able to see book covers and reviews before borrowing. It makes discovering new books so much easier!"</div>
-                    <div class="author">— Michael Chen, Member</div>
-                </div>
-                <div class="testimonial">
-                    <div class="quote">"The overdue tracking and automated notifications have saved us countless hours. Highly recommended!"</div>
-                    <div class="author">— Emily Davis, Administrator</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="hero" style="margin: 60px 0;">
-            <h2>Ready to Get Started?</h2>
-            <p>Join hundreds of libraries already using our system to streamline their operations.</p>
-            <div class="cta-buttons">
-                <a href="login.php" class="cta-btn">🔐 Login Now</a>
-                <a href="register.php" class="cta-btn">✨ Create Account</a>
-            </div>
-        </div>
-
-        <div style="text-align: center; padding: 40px 0; color: #666; border-top: 1px solid #ddd; margin-top: 60px;">
-            <p>© 2025 Library Management System. All rights reserved.</p>
-            <p style="margin-top: 10px;">Built with ❤️ for modern libraries</p>
-        </div>
-
+<section class="landing-columns">
+    <div>
+        <h2>For students</h2>
+        <ul class="landing-list">
+            <li><?php echo icon('search', 18); ?><span><strong>Find a book</strong> by title, author or category, and see the shelf and row it sits on.</span></li>
+            <li><?php echo icon('clock', 18); ?><span><strong>Know your due dates.</strong> Your dashboard shows what you have and when it goes back.</span></li>
+            <li><?php echo icon('star', 18); ?><span><strong>Rate what you read</strong> so classmates can pick their next book.</span></li>
+        </ul>
     </div>
-</body>
-</html>
+    <div>
+        <h2>For the librarian</h2>
+        <ul class="landing-list">
+            <li><?php echo icon('swap', 18); ?><span><strong>Issue and return</strong> in two clicks, with copies counted for you.</span></li>
+            <li><?php echo icon('alert', 18); ?><span><strong>See overdue books</strong> at a glance, with who has them and how late they are.</span></li>
+            <li><?php echo icon('users', 18); ?><span><strong>Import a class list</strong> or a book list from a CSV file instead of typing it in.</span></li>
+        </ul>
+    </div>
+</section>
+
+<?php include 'includes/footer.php'; ?>

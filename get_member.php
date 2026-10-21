@@ -14,7 +14,7 @@ if ($db_error || !$conn) {
     echo json_encode(['error' => 'Database connection error']);
     exit();
 }
-$res = $conn->query("SELECT id, name, class, membership_date, first_name, last_name, group_name FROM members WHERE id = $id");
+$res = $conn->query("SELECT id, name, class, membership_date, first_name, last_name, group_name, status FROM members WHERE id = $id");
 if ($res && $res->num_rows > 0) {
     echo json_encode($res->fetch_assoc());
 } else {

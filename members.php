@@ -3,8 +3,6 @@ session_start();
 include 'auth_check.php';
 require_staff();
 include 'config.php';
-include 'includes/header.php';
-include 'includes/functions.php';
 
 // Ensure extra columns for admin features (first_name, last_name, group_name)
 if (!$db_error && is_staff()) {
@@ -144,94 +142,7 @@ if (!$db_error && is_staff() && isset($_POST['import_csv'])) {
     exit;
 }
 
-// Handle form submission
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
-    $isAdmin = is_staff();
-    $membership_date = $_POST['membership_date'] ?? date('Y-m-d');
-    $status = 'active'; // Default to active
-    $edit_id = isset($_POST['edit_member_id']) ? (int)$_POST['edit_member_id'] : 0;
-
-    if ($isAdmin) {
-        $first = trim($_POST['first_name'] ?? '');
-        $last = trim($_POST['last_name'] ?? '');
-        $class = trim($_POST['class'] ?? '');
-        $group = trim($_POST['group_name'] ?? '');
-        $name = trim($first . ' ' . $last);
-        if ($first === '' && $last === '') {
-            $_SESSION['error_message'] = 'First Name and/or Last Name is required!';
-        } else if ($edit_id) {
-            $stmt = $conn->prepare("UPDATE members SET name=?, first_name=?, last_name=?, class=?, group_name=?, membership_date=? WHERE id=?");
-            $stmt->bind_param("ssssssi", $name, $first, $last, $class, $group, $membership_date, $edit_id);
-            if ($stmt->execute()) {
-                $_SESSION['success_message'] = 'Member updated successfully!';
-            } else {
-                $_SESSION['error_message'] = 'Error updating member: ' . $conn->error;
-            }
-            $stmt->close();
-        } else {
-            $stmt = $conn->prepare("INSERT INTO members (name, first_name, last_name, class, group_name, membership_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sssssss", $name, $first, $last, $class, $group, $membership_date, $status);
-            if ($stmt->execute()) {
-                $_SESSION['success_message'] = 'Member added successfully!';
-            } else {
-                $_SESSION['error_message'] = 'Error adding member: ' . $conn->error;
-            }
-            $stmt->close();
-        }
-    } else {
-        $name = trim($_POST['name'] ?? '');
-        $class = trim($_POST['class'] ?? '');
-        if (empty($name)) {
-            $_SESSION['error_message'] = 'Name is required!';
-        } else if ($edit_id) {
-            $stmt = $conn->prepare("UPDATE members SET name=?, class=?, membership_date=? WHERE id=?");
-            $stmt->bind_param("sssi", $name, $class, $membership_date, $edit_id);
-            if ($stmt->execute()) {
-                $_SESSION['success_message'] = 'Member updated successfully!';
-            } else {
-                $_SESSION['error_message'] = 'Error updating member: ' . $conn->error;
-            }
-            $stmt->close();
-        } else {
-            $stmt = $conn->prepare("INSERT INTO members (name, class, membership_date, status) VALUES (?, ?, ?, ?)");
-            $stmt->bind_param("ssss", $name, $class, $membership_date, $status);
-            if ($stmt->execute()) {
-                $_SESSION['success_message'] = 'Member added successfully!';
-            } else {
-                $_SESSION['error_message'] = 'Error adding member: ' . $conn->error;
-            }
-            $stmt->close();
-        }
-    }
-    header("Location: members.php");
-    exit();
-}
-
-// Handle delete
-if (isset($_GET['delete']) && !$db_error) {
-    if (!is_admin()) {
-        $_SESSION['error_message'] = 'Only the admin can delete members.';
-        header("Location: members.php");
-        exit();
-    }
-    $member_id = (int)$_GET['delete'];
-    $stmt = $conn->prepare("DELETE FROM members WHERE id = ?");
-    $stmt->bind_param("i", $member_id);
-    
-    if ($stmt->execute()) {
-        $_SESSION['success_message'] = 'Member deleted successfully!';
-    } else {
-        $_SESSION['error_message'] = 'Error deleting member: ' . $conn->error;
-    }
-    $stmt->close();
-    
-    header("Location: members.php");
-    exit();
-}
-?>
-
-<?php
-// Admin-only: quick add manual classes (free text like "toddlers, 7H, 8E")
+// Add extra class names (free text like "toddlers, 7H, 8E")
 if (isset($_POST['add_manual_classes']) && is_staff()) {
     $raw = trim($_POST['manual_classes'] ?? '');
     if ($raw === '') {
@@ -244,7 +155,7 @@ if (isset($_POST['add_manual_classes']) && is_staff()) {
             if ($p === '') continue;
             // Basic validation: allow letters, numbers, spaces, hyphen
             if (!preg_match('/^[A-Za-z0-9 \-]{1,40}$/', $p)) {
-                $_SESSION['error_message'] = 'Invalid class name: ' . htmlspecialchars($p);
+                $_SESSION['error_message'] = 'Invalid class name: ' . $p;
                 $clean = []; // Abort
                 break;
             }
@@ -270,7 +181,7 @@ if (isset($_POST['add_manual_classes']) && is_staff()) {
                 if (@file_put_contents($manualPath, $export) === false) {
                     $_SESSION['error_message'] = 'Failed to write manual classes file.';
                 } else {
-                    $_SESSION['success_message'] = 'Added ' . count($added) . ' class(es): ' . htmlspecialchars(implode(', ', $added));
+                    $_SESSION['success_message'] = 'Added ' . count($added) . ' class(es): ' . implode(', ', $added);
                 }
             } else if (empty($_SESSION['error_message'])) {
                 $_SESSION['error_message'] = 'No new classes added (duplicates skipped).';
@@ -280,624 +191,455 @@ if (isset($_POST['add_manual_classes']) && is_staff()) {
     header('Location: members.php');
     exit();
 }
+
+// ---------- Add / edit a member ----------
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_member']) && !$db_error) {
+    $edit_id = (int)($_POST['edit_member_id'] ?? 0);
+    $first = trim($_POST['first_name'] ?? '');
+    $last = trim($_POST['last_name'] ?? '');
+    $class = trim($_POST['class'] ?? '');
+    $group = trim($_POST['group_name'] ?? '');
+    $membership_date = $_POST['membership_date'] ?: date('Y-m-d');
+    $status = ($_POST['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
+    $name = trim($first . ' ' . $last);
+
+    if ($name === '') {
+        $_SESSION['error_message'] = 'Enter a first or last name.';
+    } elseif ($edit_id) {
+        $stmt = $conn->prepare("UPDATE members SET name=?, first_name=?, last_name=?, class=?, group_name=?, membership_date=?, status=? WHERE id=?");
+        $stmt->bind_param("sssssssi", $name, $first, $last, $class, $group, $membership_date, $status, $edit_id);
+        if ($stmt->execute()) {
+            $_SESSION['success_message'] = 'Saved changes to ' . $name . '.';
+        } else {
+            $_SESSION['error_message'] = 'Could not save: ' . $conn->error;
+        }
+        $stmt->close();
+    } else {
+        $stmt = $conn->prepare("INSERT INTO members (name, first_name, last_name, class, group_name, membership_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("sssssss", $name, $first, $last, $class, $group, $membership_date, $status);
+        if ($stmt->execute()) {
+            $_SESSION['success_message'] = 'Added ' . $name . '.';
+        } else {
+            $_SESSION['error_message'] = 'Could not add: ' . $conn->error;
+        }
+        $stmt->close();
+    }
+    header("Location: members.php");
+    exit();
+}
+
+// ---------- Delete (admin only) ----------
+if (isset($_GET['delete']) && !$db_error) {
+    if (!is_admin()) {
+        $_SESSION['error_message'] = 'Only the admin can delete members.';
+        header("Location: members.php");
+        exit();
+    }
+    $member_id = (int)$_GET['delete'];
+    $stmt = $conn->prepare("DELETE FROM members WHERE id = ?");
+    $stmt->bind_param("i", $member_id);
+    if ($stmt->execute()) {
+            $_SESSION['success_message'] = 'Member deleted.';
+        } else {
+            $_SESSION['error_message'] = 'Could not delete: ' . $conn->error;
+        }
+    $stmt->close();
+    header("Location: members.php");
+    exit();
+}
+
+$page_title = 'Members';
+include 'includes/header.php';
+
+// ---------- Data ----------
+$members = [];
+$class_list = [];
+if (!$db_error && $conn) {
+    $res = $conn->query("SELECT m.*, u.username,
+                                (SELECT COUNT(*) FROM borrowings br WHERE br.member_id = m.id AND br.status = 'active') AS on_loan,
+                                (SELECT COUNT(*) FROM borrowings br WHERE br.member_id = m.id AND br.status = 'active' AND br.due_date < CURDATE()) AS overdue
+                         FROM members m
+                         LEFT JOIN users u ON u.member_id = m.id
+                         ORDER BY COALESCE(NULLIF(m.last_name, ''), m.name), COALESCE(NULLIF(m.first_name, ''), m.name)");
+    if ($res) {
+        $members = $res->fetch_all(MYSQLI_ASSOC);
+    }
+    foreach ($members as $m) {
+        if (!empty($m['class'])) {
+            $class_list[$m['class']] = true;
+        }
+    }
+    $class_list = array_keys($class_list);
+    natcasesort($class_list);
+}
+$active_count = count(array_filter($members, fn($m) => $m['status'] === 'active'));
+$manual_classes = file_exists(__DIR__ . '/includes/manual_classes.php') ? include __DIR__ . '/includes/manual_classes.php' : [];
+if (!is_array($manual_classes)) {
+    $manual_classes = [];
+}
 ?>
 
-<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 35px; margin: -20px -20px 30px -20px; border-radius: 0 0 20px 20px; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);">
-    <h1 style="color: white; margin: 0; display: flex; align-items: center; gap: 12px; font-size: 2rem; text-shadow: 0 2px 4px rgba(0,0,0,0.2);"><span style="font-size: 2.2rem;">👥</span> Members Management</h1>
-    <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 1.05rem;">Manage your library members</p>
+<div class="page-header">
+    <div>
+        <h1>Members</h1>
+        <p><?php echo $active_count; ?> active of <?php echo count($members); ?> students and staff</p>
+    </div>
+    <div class="toolbar-group">
+        <button class="btn btn-outline" onclick="openClassManagerModal()">Classes</button>
+        <button class="btn btn-outline" onclick="openImportModal()">Import CSV</button>
+        <button class="btn btn-primary" onclick="openMemberModal()"><?php echo icon('plus', 16); ?>Add member</button>
+    </div>
 </div>
 
 <?php
-// Display success/error messages
-if (isset($_SESSION['success_message'])) {
-    echo '<div class="alert alert-success" style="border-radius: 12px; border-left: 4px solid #4CAF50; background: #e8f5e9; color: #2e7d32; padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);">' . htmlspecialchars($_SESSION['success_message']) . '</div>';
-    unset($_SESSION['success_message']);
+foreach (['success_message' => ['alert-success', 'check-circle'], 'error_message' => ['alert-danger', 'alert']] as $key => [$cls, $ic]) {
+    if (isset($_SESSION[$key])) {
+        echo '<div class="alert ' . $cls . '">' . icon($ic, 16) . htmlspecialchars($_SESSION[$key]) . '</div>';
+        unset($_SESSION[$key]);
+    }
 }
-if (isset($_SESSION['error_message'])) {
-    echo '<div class="alert alert-danger" style="border-radius: 12px; border-left: 4px solid #f44336; background: #ffebee; color: #c62828; padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(244, 67, 54, 0.2);">' . htmlspecialchars($_SESSION['error_message']) . '</div>';
-    unset($_SESSION['error_message']);
-}
-
 if ($db_error) {
-    echo '<div class="alert alert-danger" style="border-radius: 12px; border-left: 4px solid #f44336; background: #ffebee; color: #c62828; padding: 15px 20px; margin-bottom: 20px;">Database connection error. Please check your configuration.</div>';
+    echo '<div class="alert alert-danger">' . icon('alert', 16) . 'Cannot connect to the database. Start MySQL in XAMPP.</div>';
 }
 ?>
 
-<div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin-bottom: 25px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-        <h2 style="margin: 0; color: #333; font-size: 1.5rem; display: flex; align-items: center; gap: 10px;"><span style="color: #667eea; font-size: 1.3rem;">📋</span> Members List</h2>
-        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-            <?php if (!is_staff()): ?>
-            <label for="statusFilter" style="font-weight: 600; color: #555; display: flex; align-items: center; gap: 8px;"><span style="font-size: 0.9rem;">🔍</span> Filter:</label>
-            <select id="statusFilter" onchange="filterMembers()" style="padding: 10px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; background: white; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='#667eea'" onmouseout="this.style.borderColor='#e0e0e0'">
-                <option value="all">All Members</option>
-                <option value="active">Active Only</option>
-                <option value="inactive">Inactive Only</option>
+<section class="panel">
+    <div class="toolbar">
+        <div class="toolbar-group">
+            <div class="search-input">
+                <?php echo icon('search', 16); ?>
+                <input type="search" id="memberSearch" placeholder="Search by name or group" oninput="applyMemberFilters()">
+            </div>
+            <select id="classFilter" class="select" onchange="applyMemberFilters()">
+                <option value="">All classes</option>
+                <?php foreach ($class_list as $c): ?>
+                    <option value="<?php echo htmlspecialchars($c); ?>"><?php echo htmlspecialchars($c); ?></option>
+                <?php endforeach; ?>
             </select>
-            <?php endif; ?>
-            <button onclick="openMemberModal()" class="btn btn-success" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(76,175,80,0.3); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(76,175,80,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(76,175,80,0.3)'">➕ Add New Member</button>
-            <button onclick="openClassManagerModal()" class="btn btn-info" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; background: linear-gradient(135deg, #42a5f5 0%, #7e57c2 100%); color: white; font-weight: 600; box-shadow: 0 2px 8px rgba(33,150,243,0.18); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(33,150,243,0.25)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(33,150,243,0.18)'">🏷️ Manage Classes</button>
-            <?php if (is_staff()): ?>
-            <button onclick="openImportModal()" class="btn btn-warning" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; background: linear-gradient(135deg,#ffb74d 0%, #ff7043 100%); color: white; font-weight: 600; box-shadow: 0 2px 8px rgba(255,167,38,0.25);">📥 Import CSV</button>
-            <a href="download_members_template.php" class="btn btn-secondary" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; background: linear-gradient(135deg, #78909c 0%, #546e7a 100%); color: white; font-weight: 600; box-shadow: 0 2px 8px rgba(96,125,139,0.25); text-decoration: none; display: inline-block;">📄 Download CSV Template</a>
-            <?php endif; ?>
+            <select id="statusFilter" class="select" onchange="applyMemberFilters()">
+                <option value="">Any status</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="overdue">Has overdue books</option>
+            </select>
         </div>
+        <span class="muted" id="memberCount" style="font-size: 0.88rem;"></span>
     </div>
-    <?php if (is_staff()): ?>
-    <div style="margin-top:25px; background: linear-gradient(135deg,#f5f7fa 0%, #e8ecf5 100%); padding:18px 20px; border-radius:12px; border:1px solid #d0d7e2;">
-        <h3 style="margin:0 0 12px 0; font-size:1.15rem; display:flex; align-items:center; gap:8px; color:#334e68;">✍️ Quick Add Manual Classes</h3>
-        <p style="margin:0 0 12px 0; color:#5d6d7e; font-size:0.9rem;">Type custom class names (examples: <code>toddlers</code>, <code>7H</code>, <code>8E</code>) separated by commas or new lines. These will appear in the class dropdown immediately.</p>
-        <form method="POST" action="" style="display:flex; flex-direction:column; gap:12px;">
-            <textarea name="manual_classes" rows="2" placeholder="toddlers, 7H, 8E" style="width:100%; padding:10px; border:2px solid #ccd6e0; border-radius:8px; font-size:0.9rem; resize:vertical;" onfocus="this.style.borderColor='#667eea'" onblur="this.style.borderColor='#ccd6e0'"></textarea>
-            <input type="hidden" name="add_manual_classes" value="1" />
-            <div style="display:flex; gap:10px;">
-                <button type="submit" class="btn btn-primary" style="flex:1; padding:10px 18px; background:linear-gradient(135deg,#667eea 0%, #764ba2 100%); border:none; border-radius:8px; color:white; font-weight:600; font-size:0.95rem; cursor:pointer; box-shadow:0 2px 8px rgba(102,126,234,0.3);" onmouseover="this.style.transform='translateY(-2px)';" onmouseout="this.style.transform='translateY(0)'">➕ Add Classes</button>
-                <button type="button" onclick="this.closest('form').querySelector('textarea').value='';" class="btn btn-secondary" style="padding:10px 18px; background:#e0e0e0; border:none; border-radius:8px; color:#555; font-weight:600; font-size:0.95rem; cursor:pointer;" onmouseover="this.style.background='#d0d0d0'" onmouseout="this.style.background='#e0e0e0'">Clear</button>
-            </div>
-        </form>
-        <?php
-        // Show existing manual classes for reference
-        $manualExistingPath = __DIR__ . '/includes/manual_classes.php';
-        $manualExisting = file_exists($manualExistingPath) ? include $manualExistingPath : [];
-        if ($manualExisting && is_array($manualExisting) && count($manualExisting) > 0): ?>
-            <div style="margin-top:12px; font-size:0.85rem; color:#444;">
-                <strong>Existing manual classes:</strong>
-                <span><?php echo htmlspecialchars(implode(', ', $manualExisting)); ?></span>
-            </div>
-        <?php else: ?>
-            <div style="margin-top:12px; font-size:0.85rem; color:#777;">No manual classes added yet.</div>
-        <?php endif; ?>
-    </div>
-    <?php endif; ?>
-</div>
 
-<!-- Class Manager Modal -->
-<div id="classManagerModal" class="modal">
-    <div class="modal-content" style="border-radius: 16px; max-width: 600px; padding: 0; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #42a5f5 0%, #7e57c2 100%); padding: 25px 30px; position: relative;">
-            <h2 style="margin: 0; color: white; display: flex; align-items: center; gap: 10px; font-size: 1.6rem;">🏷️ Manage Classes</h2>
-            <span class="modal-close" onclick="closeClassManagerModal()" style="position: absolute; top: 20px; right: 25px; color: white; font-size: 2rem; opacity: 0.9; cursor: pointer;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">&times;</span>
-        </div>
-        <div style="padding: 30px;">
-            <form id="classManagerForm" onsubmit="return saveClassConfig(event)">
-                <div class="form-group" style="margin-bottom: 18px;">
-                    <label style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Minimum Grade</label>
-                    <input type="number" id="minGradeInput" min="1" max="20" required style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem;">
-                </div>
-                <div class="form-group" style="margin-bottom: 18px;">
-                    <label style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Maximum Grade</label>
-                    <input type="number" id="maxGradeInput" min="1" max="20" required style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem;">
-                </div>
-                <div class="form-group" style="margin-bottom: 18px;">
-                    <label style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Sections (comma separated, e.g. A,B,C)</label>
-                    <input type="text" id="sectionsInput" required style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem;">
-                </div>
-                <div class="form-group" style="margin-bottom: 18px;">
-                    <label style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Academic Year Start Month (1-12)</label>
-                    <input type="number" id="startMonthInput" min="1" max="12" required style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem;">
-                </div>
-                <div class="form-group" style="margin-bottom: 18px;">
-                    <label style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Per-Year Overrides (JSON, optional)</label>
-                    <textarea id="overridesInput" rows="3" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem;"></textarea>
-                    <small style="color:#777;">Example: { "2025-2026": { "sections": ["A","B","C"] } }</small>
-                </div>
-                <div style="display: flex; gap: 12px; margin-top: 25px;">
-                    <button type="submit" class="btn btn-primary" style="flex: 1; padding: 12px 24px; background: linear-gradient(135deg, #42a5f5 0%, #7e57c2 100%); border: none; border-radius: 10px; color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 12px rgba(66, 165, 245, 0.18);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(66, 165, 245, 0.25)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(66, 165, 245, 0.18)'">💾 Save</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeClassManagerModal()" style="padding: 12px 24px; background: #e0e0e0; border: none; border-radius: 10px; color: #666; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s;" onmouseover="this.style.background='#d0d0d0'" onmouseout="this.style.background='#e0e0e0'">Cancel</button>
-                </div>
-                <div id="classManagerMsg" style="margin-top: 18px; color: #c62828; font-weight: 500;"></div>
-            </form>
-        </div>
+    <div class="table-scroll">
+        <table class="data-table" id="membersTable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Class</th>
+                    <th class="hide-sm">Group</th>
+                    <th class="hide-sm">On loan</th>
+                    <th class="hide-sm">Status</th>
+                    <th class="actions"></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($members as $m):
+                    $search = strtolower($m['name'] . ' ' . $m['group_name'] . ' ' . $m['username']);
+                ?>
+                    <tr class="member-row" style="cursor: pointer;"
+                        onclick="location.href='profile.php?id=<?php echo (int)$m['id']; ?>'"
+                        data-search="<?php echo htmlspecialchars($search); ?>"
+                        data-class="<?php echo htmlspecialchars($m['class'] ?? ''); ?>"
+                        data-status="<?php echo $m['status']; ?>"
+                        data-overdue="<?php echo $m['overdue'] > 0 ? '1' : '0'; ?>">
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span class="avatar" style="width: 32px; height: 32px; font-size: 0.8rem;">
+                                    <?php if (!empty($m['avatar_url'])): ?>
+                                        <img src="<?php echo htmlspecialchars($m['avatar_url']); ?>" alt="" onerror="this.remove()">
+                                    <?php endif; ?>
+                                    <?php echo empty($m['avatar_url']) ? htmlspecialchars(strtoupper(substr($m['name'], 0, 1))) : ''; ?>
+                                </span>
+                                <div>
+                                    <div class="cell-main"><?php echo htmlspecialchars($m['name']); ?></div>
+                                    <?php if (!empty($m['username'])): ?>
+                                        <div class="cell-sub">@<?php echo htmlspecialchars($m['username']); ?></div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="muted"><?php echo htmlspecialchars($m['class'] ?: '—'); ?></td>
+                        <td class="muted hide-sm"><?php echo htmlspecialchars($m['group_name'] ?: '—'); ?></td>
+                        <td class="hide-sm">
+                            <?php if ($m['overdue'] > 0): ?>
+                                <span class="badge badge-danger"><?php echo $m['overdue'] == $m['on_loan'] ? (int)$m['overdue'] . ' overdue' : (int)$m['on_loan'] . ' on loan · ' . (int)$m['overdue'] . ' overdue'; ?></span>
+                            <?php elseif ($m['on_loan'] > 0): ?>
+                                <span class="badge badge-success"><?php echo (int)$m['on_loan']; ?> book<?php echo $m['on_loan'] > 1 ? 's' : ''; ?></span>
+                            <?php else: ?>
+                                <span class="muted">—</span>
+                            <?php endif; ?>
+                        </td>
+                        <td class="hide-sm">
+                            <span class="badge <?php echo $m['status'] === 'active' ? 'badge-success' : 'badge-neutral'; ?>"><?php echo ucfirst($m['status']); ?></span>
+                        </td>
+                        <td class="actions">
+                            <button type="button" class="btn btn-outline btn-small" onclick="event.stopPropagation(); editMember(<?php echo (int)$m['id']; ?>)">Edit</button>
+                            <?php if (is_admin()): ?>
+                                <a href="members.php?delete=<?php echo (int)$m['id']; ?>" class="btn btn-small btn-ghost-danger" title="Delete"
+                                   onclick="event.stopPropagation(); return confirm('Delete <?php echo htmlspecialchars(addslashes($m['name']), ENT_QUOTES); ?>? Their loans, reviews and login will be removed too.')">Delete</a>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
     </div>
-</div>
+    <div class="empty" id="membersEmpty" style="display: none;">
+        <strong>No members match</strong>
+        Try a different name, class or status.
+    </div>
+</section>
 
-<!-- Member Modal -->
+<!-- Add / edit member -->
 <div id="memberModal" class="modal">
-    <div class="modal-content" style="border-radius: 16px; max-width: 550px; padding: 0; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px 30px; position: relative;">
-            <h2 style="margin: 0; color: white; display: flex; align-items: center; gap: 10px; font-size: 1.6rem;">➕ Add New Member</h2>
-            <span class="modal-close" onclick="closeMemberModal()" style="position: absolute; top: 20px; right: 25px; color: white; font-size: 2rem; opacity: 0.9; cursor: pointer;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">&times;</span>
+    <div class="modal-content has-parts modal-sm">
+        <div class="modal-header">
+            <h2 id="memberModalTitle">Add member</h2>
+            <button type="button" class="icon-button" onclick="closeMemberModal()" aria-label="Close"><?php echo icon('x', 18); ?></button>
         </div>
-        <form method="POST" action="" id="memberForm" style="padding: 30px;">
-            <?php if (is_staff()): ?>
-            <div class="form-group" style="margin-bottom: 20px; display: flex; gap: 16px;">
-                <div style="flex:1;">
-                    <label for="first_name" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">First Name *</label>
-                    <input type="text" id="first_name" name="first_name" required style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
+        <form method="POST" action="" id="memberForm">
+            <input type="hidden" name="save_member" value="1">
+            <input type="hidden" name="edit_member_id" id="edit_member_id" value="">
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="first_name">First name</label>
+                        <input type="text" id="first_name" name="first_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="last_name">Last name</label>
+                        <input type="text" id="last_name" name="last_name">
+                    </div>
                 </div>
-                <div style="flex:1;">
-                    <label for="last_name" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Last Name *</label>
-                    <input type="text" id="last_name" name="last_name" required style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="class">Class</label>
+                        <select id="class" name="class"><option value="">Loading…</option></select>
+                        <p class="form-hint" id="ayLabel"></p>
+                    </div>
+                    <div class="form-group">
+                        <label for="group_name">Group</label>
+                        <input type="text" id="group_name" name="group_name">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="membership_date">Member since</label>
+                        <input type="date" id="membership_date" name="membership_date" required value="<?php echo date('Y-m-d'); ?>">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="status">Status</label>
+                        <select id="status" name="status">
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                        </select>
+                    </div>
                 </div>
             </div>
-            <div class="form-group" style="margin-bottom: 20px; display: flex; gap: 16px;">
-                <div style="flex:1;">
-                    <label for="class" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Class</label>
-                    <select id="class" name="class" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; cursor: pointer; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
-                        <option value="">Loading classes...</option>
-                    </select>
-                    <small id="ayLabel" style="color:#777; display: block; margin-top: 8px;"></small>
-                </div>
-                <div style="flex:1;">
-                    <label for="group_name" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Group</label>
-                    <input type="text" id="group_name" name="group_name" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
-                </div>
-            </div>
-            <?php else: ?>
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label for="name" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Name *</label>
-                <input type="text" id="name" name="name" required style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
-            </div>
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label for="class" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Class</label>
-                <select id="class" name="class" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; cursor: pointer; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
-                    <option value="">Loading classes...</option>
-                </select>
-                <small id="ayLabel" style="color:#777; display: block; margin-top: 8px;"></small>
-            </div>
-            <?php endif; ?>
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label for="membership_date" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Membership Date *</label>
-                <input type="date" id="membership_date" name="membership_date" required value="<?php echo date('Y-m-d'); ?>" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'">
-            </div>
-            <div style="display: flex; gap: 12px; margin-top: 25px;">
-                <button type="submit" class="btn btn-primary" style="flex: 1; padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 10px; color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.3)'">💾 Save Member</button>
-                <button type="button" class="btn btn-secondary" onclick="closeMemberModal()" style="padding: 12px 24px; background: #e0e0e0; border: none; border-radius: 10px; color: #666; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s;" onmouseover="this.style.background='#d0d0d0'" onmouseout="this.style.background='#e0e0e0'">Cancel</button>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline" onclick="closeMemberModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="memberSubmit">Add member</button>
             </div>
         </form>
     </div>
 </div>
 
-<!-- Borrowing History Modal -->
-<div id="historyModal" class="modal">
-    <div class="modal-content" style="max-width: 900px; border-radius: 16px; padding: 0; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px 30px; position: relative;">
-            <h2 id="historyTitle" style="margin: 0; color: white; display: flex; align-items: center; gap: 10px; font-size: 1.6rem;">📚 Borrowing History</h2>
-            <span class="modal-close" onclick="closeHistoryModal()" style="position: absolute; top: 20px; right: 25px; color: white; font-size: 2rem; opacity: 0.9; cursor: pointer;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">&times;</span>
+<!-- Classes -->
+<div id="classManagerModal" class="modal">
+    <div class="modal-content has-parts">
+        <div class="modal-header">
+            <h2>Classes</h2>
+            <button type="button" class="icon-button" onclick="closeClassManagerModal()" aria-label="Close"><?php echo icon('x', 18); ?></button>
         </div>
-        <div id="historyContent" style="padding: 30px;">
-            <p style="text-align: center; color: #999; padding: 20px 0;">Loading...</p>
+        <div class="modal-body">
+            <h3 style="margin-bottom: 4px;">Grades and sections</h3>
+            <p class="form-hint" style="margin: 0 0 14px;">The class list is built from these, e.g. grades 1–12 with sections A, B gives 1A … 12B.</p>
+            <form id="classManagerForm" onsubmit="return saveClassConfig(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="minGradeInput">From grade</label>
+                        <input type="number" id="minGradeInput" min="1" max="20" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="maxGradeInput">To grade</label>
+                        <input type="number" id="maxGradeInput" min="1" max="20" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="sectionsInput">Sections</label>
+                        <input type="text" id="sectionsInput" required placeholder="A,B,C">
+                    </div>
+                    <div class="form-group">
+                        <label for="startMonthInput">School year starts in month</label>
+                        <input type="number" id="startMonthInput" min="1" max="12" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="overridesInput">Changes for a specific year <span class="muted">(optional, JSON)</span></label>
+                    <textarea id="overridesInput" rows="2" placeholder='{ "2026-2027": { "sections": ["A","B","C"] } }' style="min-height: 0;"></textarea>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button type="submit" class="btn btn-primary">Save grades</button>
+                    <span id="classManagerMsg" class="form-hint" style="margin: 0;"></span>
+                </div>
+            </form>
+
+            <hr style="border: none; border-top: 1px solid var(--line); margin: 22px 0;">
+
+            <h3 style="margin-bottom: 4px;">Extra classes</h3>
+            <p class="form-hint" style="margin: 0 0 14px;">Names that don't fit the grade pattern, like "toddlers" or "7H". Separate with commas.</p>
+            <form method="POST" action="">
+                <input type="hidden" name="add_manual_classes" value="1">
+                <div class="form-group">
+                    <textarea name="manual_classes" rows="2" placeholder="toddlers, 7H, 8E" style="min-height: 0;"></textarea>
+                </div>
+                <button type="submit" class="btn btn-outline">Add classes</button>
+            </form>
+            <p class="form-hint" style="margin-top: 12px;">
+                <?php echo $manual_classes ? 'Already added: ' . htmlspecialchars(implode(', ', $manual_classes)) : 'No extra classes yet.'; ?>
+            </p>
         </div>
     </div>
 </div>
 
-<table class="table" style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08);">
-    <thead>
-        <?php if (is_staff()): ?>
-            <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600; border-radius: 12px 0 0 0;">First Name</th>
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Last Name</th>
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Class</th>
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Group</th>
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600; border-radius: 0 12px 0 0;">Actions</th>
-            </tr>
-        <?php else: ?>
-            <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600; border-radius: 12px 0 0 0;">Name</th>
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Class</th>
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Status</th>
-                <th style="color: white; padding: 15px; text-align: left; font-weight: 600; border-radius: 0 12px 0 0;">Actions</th>
-            </tr>
-        <?php endif; ?>
-    </thead>
-    <tbody>
-        <?php
-        if (!$db_error && $conn) {
-            if (is_staff()) {
-                $result = $conn->query("SELECT * FROM members ORDER BY COALESCE(NULLIF(last_name,''), name) ASC, COALESCE(NULLIF(first_name,''), name) ASC");
-            } else {
-                $result = $conn->query("SELECT * FROM members ORDER BY name ASC");
-            }
-            
-            if ($result && $result->num_rows > 0) {
-                while ($member = $result->fetch_assoc()) {
-                    if (is_staff()) {
-                        $first = isset($member['first_name']) && $member['first_name'] ? $member['first_name'] : '';
-                        $last  = isset($member['last_name']) && $member['last_name'] ? $member['last_name'] : '';
-                        if ($first === '' && $member['name']) {
-                            // Try to split
-                            $parts = preg_split('/\s+/', $member['name']);
-                            $first = array_shift($parts);
-                            $last = implode(' ', $parts);
-                        }
-                        $group = isset($member['group_name']) && $member['group_name'] !== '' ? $member['group_name'] : '-';
-                        echo "<tr style='cursor: pointer; transition: all 0.2s; border-bottom: 1px solid #f0f0f0;' onclick='window.location.href=\"profile.php?id=" . $member['id'] . "\"' onmouseover='this.style.backgroundColor=\"#f8f9fa\"; this.style.transform=\"scale(1.01)\"' onmouseout='this.style.backgroundColor=\"\"; this.style.transform=\"scale(1)\"'>";
-                        echo "<td style='padding: 15px; font-weight: 500; color: #333;'>" . htmlspecialchars($first) . "</td>";
-                        echo "<td style='padding: 15px; font-weight: 500; color: #333;'>" . htmlspecialchars($last) . "</td>";
-                        echo "<td style='padding: 15px; color: #666;'>" . htmlspecialchars($member['class'] ?? '-') . "</td>";
-                        echo "<td style='padding: 15px; color: #666;'>" . htmlspecialchars($group) . "</td>";
-                        echo "<td style='padding: 15px;'>
-                            <button onclick='event.stopPropagation(); editMember(" . $member['id'] . ")' class='btn btn-small btn-warning' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; margin-right: 6px; transition: all 0.2s;'>✏️ Edit</button>
-                            " . (is_admin() ? "<a href='members.php?delete=" . $member['id'] . "' class='btn btn-small btn-danger' onclick='event.stopPropagation(); return confirm(\"Are you sure you want to delete this member?\")' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; text-decoration: none; display: inline-block;'>🗑️</a>" : "") . "
-                        </td>";
-                        echo "</tr>";
-                    } else {
-                        // Non-admin original view
-                        // Check if member has active borrowings
-                        $checkActive = $conn->query("SELECT COUNT(*) as count FROM borrowings WHERE member_id = " . $member['id'] . " AND status = 'active'");
-                        $activeCount = $checkActive->fetch_assoc()['count'];
-                        $hasActive = $activeCount > 0;
-                        $buttonClass = $hasActive ? 'btn-success' : 'btn-secondary';
-                        $buttonText = $hasActive ? '📖 Active' : '📚 Inactive';
-                        $buttonFunction = $hasActive ? 'viewActiveBorrowings' : 'viewLastRead';
-                        echo "<tr style='cursor: pointer; transition: all 0.2s; border-bottom: 1px solid #f0f0f0;' onclick='window.location.href=\"profile.php?id=" . $member['id'] . "\"' onmouseover='this.style.backgroundColor=\"#f8f9fa\"; this.style.transform=\"scale(1.01)\"' onmouseout='this.style.backgroundColor=\"\"; this.style.transform=\"scale(1)\"'>";
-                        echo "<td style='padding: 15px; font-weight: 500; color: #333;'>" . htmlspecialchars($member['name']) . "</td>";
-                        echo "<td style='padding: 15px; color: #666;'>" . htmlspecialchars($member['class'] ?? '-') . "</td>";
-                        echo "<td style='padding: 15px;'>
-                            <button onclick='event.stopPropagation(); " . $buttonFunction . "(" . $member['id'] . ", \"" . htmlspecialchars($member['name'], ENT_QUOTES) . "\")' class='btn btn-small " . $buttonClass . "' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 20px; font-weight: 500; transition: all 0.2s;'>" . $buttonText . "</button>
-                        </td>";
-                        echo "<td style='padding: 15px;'>
-                            <button onclick='event.stopPropagation(); editMember(" . $member['id'] . ")' class='btn btn-small btn-warning' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; margin-right: 6px; transition: all 0.2s;'>✏️ Edit</button>
-                            " . (is_admin() ? "<a href='members.php?delete=" . $member['id'] . "' class='btn btn-small btn-danger' onclick='event.stopPropagation(); return confirm(\"Are you sure you want to delete this member?\")' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; text-decoration: none; display: inline-block;'>🗑️</a>" : "") . "
-                        </td>";
-                        echo "</tr>";
-                    }
-                }
-            } else {
-                $colspan = (is_staff()) ? 5 : 4;
-                echo "<tr><td colspan='".$colspan."' style='text-align:center; padding: 60px 20px; color: #999;'><div style='font-size: 3rem; margin-bottom: 15px; opacity: 0.3;'>👥</div><p style='font-size: 1.1rem; margin: 0;'>No members found. Click 'Add New Member' to add one!</p></td></tr>";
-            }
-        } else {
-            echo "<tr><td colspan='4' style='text-align:center; padding: 40px 20px; color: #e74c3c; font-weight: 500;'>Database connection error.</td></tr>";
-        }
-        ?>
-    </tbody>
-</table>
-
-<?php if (is_staff()): ?>
-<!-- Import CSV Modal (admin only) -->
-<div id="importModal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 9999;">
-    <div style="background: white; width: min(580px, 92vw); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); overflow: hidden;">
-        <div style="padding: 16px 20px; background: linear-gradient(135deg,#ffb74d 0%, #ff7043 100%); color: white; display:flex; align-items:center; justify-content:space-between;">
-            <h3 style="margin:0; font-weight:600;">📥 Import Students from CSV</h3>
-            <button onclick="closeImportModal()" class="btn btn-small btn-secondary" style="background: rgba(255,255,255,0.2); border:none;">✖</button>
+<!-- Import CSV -->
+<div id="importModal" class="modal">
+    <div class="modal-content has-parts modal-sm">
+        <div class="modal-header">
+            <h2>Import students from CSV</h2>
+            <button type="button" class="icon-button" onclick="closeImportModal()" aria-label="Close"><?php echo icon('x', 18); ?></button>
         </div>
-        <form method="POST" enctype="multipart/form-data" style="padding: 20px;">
-            <input type="hidden" name="import_csv" value="1" />
-            <div style="margin-bottom: 12px;">
-                <label style="font-weight:600; color:#333; display:block; margin-bottom:8px;">CSV File</label>
-                <input type="file" name="csv_file" accept=".csv" required style="padding:10px; border:2px solid #e0e0e0; border-radius:8px; width:100%;" />
+        <form method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="import_csv" value="1">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="csv_file">CSV file</label>
+                    <input type="file" id="csv_file" name="csv_file" accept=".csv" required class="input">
+                </div>
+                <div class="alert alert-info" style="display: block; margin-bottom: 0;">
+                    The first row must name the columns <strong>First Name, Last Name, Class, Group</strong>.
+                    Students who already exist (same name and class) are updated, not duplicated.
+                    <div style="margin-top: 8px;"><a href="download_members_template.php">Download a template</a></div>
+                </div>
             </div>
-            <div style="background:#fff8e1; border:1px solid #ffe0b2; border-radius:8px; padding:12px; color:#8d6e63; margin-bottom: 16px;">
-                <div style="font-weight:600; margin-bottom:6px;">Expected columns (header row required):</div>
-                <code>First Name, Last Name, Class, Group</code>
-                <div style="margin-top:8px; font-size:0.9rem;">Example:<br />
-                <code>Emma, Johnson, 7H, A</code></div>
-            </div>
-            <div style="display:flex; gap:10px; justify-content:flex-end;">
-                <button type="button" onclick="closeImportModal()" class="btn btn-secondary">Cancel</button>
-                <button type="submit" class="btn btn-warning" style="background: linear-gradient(135deg,#ffb74d 0%, #ff7043 100%); color:white;">Import</button>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline" onclick="closeImportModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Import</button>
             </div>
         </form>
     </div>
 </div>
-<?php endif; ?>
 
 <script>
+// ---------- Filters ----------
+function applyMemberFilters() {
+    const q = document.getElementById('memberSearch').value.trim().toLowerCase();
+    const cls = document.getElementById('classFilter').value;
+    const status = document.getElementById('statusFilter').value;
+    const rows = document.querySelectorAll('.member-row');
+    let visible = 0;
+    rows.forEach(row => {
+        let show = (!q || row.dataset.search.includes(q) || row.dataset.class.toLowerCase().includes(q))
+            && (!cls || row.dataset.class === cls)
+            && (!status || (status === 'overdue' ? row.dataset.overdue === '1' : row.dataset.status === status));
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    document.getElementById('membersEmpty').style.display = visible ? 'none' : 'block';
+    document.getElementById('membersTable').style.display = visible ? '' : 'none';
+    document.getElementById('memberCount').textContent = visible === rows.length ? rows.length + ' members' : visible + ' of ' + rows.length;
+}
+
+// ---------- Add / edit ----------
 function openMemberModal() {
-    document.getElementById('memberModal').style.display = 'block';
-    document.querySelector('#memberModal h2').textContent = '➕ Add New Member';
-    // Remove edit ID if exists
-    const editId = document.getElementById('edit_member_id');
-    if (editId) editId.remove();
+    document.getElementById('memberForm').reset();
+    document.getElementById('edit_member_id').value = '';
+    document.getElementById('memberModalTitle').textContent = 'Add member';
+    document.getElementById('memberSubmit').textContent = 'Add member';
     populateClassOptions('');
+    document.getElementById('memberModal').style.display = 'block';
+    setTimeout(() => document.getElementById('first_name').focus(), 50);
 }
 
 function closeMemberModal() {
     document.getElementById('memberModal').style.display = 'none';
-    document.getElementById('memberForm').reset();
-    // Remove edit ID if exists
-    const editId = document.getElementById('edit_member_id');
-    if (editId) editId.remove();
-}
-
-// Close modal when clicking outside
-window.onclick = function(event) {
-    const modal = document.getElementById('memberModal');
-    if (event.target == modal) {
-        closeMemberModal();
-    }
-}
-
-// Close modal on ESC key
-document.addEventListener('keydown', function(event) {
-    if (event.key === 'Escape') {
-        closeMemberModal();
-        closeHistoryModal();
-    }
-});
-
-// Import CSV modal controls
-function openImportModal(){
-    const m = document.getElementById('importModal');
-    if (m) m.style.display='flex';
-}
-function closeImportModal(){
-    const m = document.getElementById('importModal');
-    if (m) m.style.display='none';
-}
-
-function viewMemberHistory(memberId, memberName) {
-    const modal = document.getElementById('historyModal');
-    const title = document.getElementById('historyTitle');
-    const content = document.getElementById('historyContent');
-    
-    title.textContent = '📚 Borrowing History - ' + memberName;
-    content.innerHTML = '<p style="text-align: center;">Loading...</p>';
-    modal.style.display = 'block';
-    
-    // Fetch borrowing history via AJAX
-    fetch('get_member_history.php?member_id=' + memberId)
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                content.innerHTML = '<p style="text-align: center; color: #e74c3c;">' + data.error + '</p>';
-            } else if (data.length === 0) {
-                content.innerHTML = '<p style="text-align: center;">No borrowing history found.</p>';
-            } else {
-                let html = '<table class="table" style="width: 100%; border-collapse: collapse;">';
-                html += '<thead style="background: #f7f7f7; font-weight: 600; color: #333;">';
-                html += '<tr>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Book Title</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Author</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Borrow Date</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Due Date</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Return Date</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Status</th>';
-                html += '</tr>';
-                html += '</thead>';
-                html += '<tbody>';
-                
-                data.forEach(record => {
-                    html += '<tr style="transition: background-color 0.2s;">';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + escapeHtml(record.title) + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + escapeHtml(record.author) + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + record.borrow_date + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + record.due_date + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + (record.return_date || '-') + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;"><span class="status-' + record.status + '" style="font-weight: 500;">' + record.status.charAt(0).toUpperCase() + record.status.slice(1) + '</span></td>';
-                    html += '</tr>';
-                });
-                
-                html += '</tbody>';
-                html += '</table>';
-                content.innerHTML = html;
-            }
-        })
-        .catch(error => {
-            content.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading history.</p>';
-        });
-}
-
-function closeHistoryModal() {
-    document.getElementById('historyModal').style.display = 'none';
-}
-
-function viewActiveBorrowings(memberId, memberName) {
-    const modal = document.getElementById('historyModal');
-    const title = document.getElementById('historyTitle');
-    const content = document.getElementById('historyContent');
-    
-    title.textContent = '📖 Currently Reading - ' + memberName;
-    content.innerHTML = '<p style="text-align: center;">Loading...</p>';
-    modal.style.display = 'block';
-    
-    // Fetch active borrowings via AJAX
-    fetch('get_member_history.php?member_id=' + memberId + '&status=active')
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                content.innerHTML = '<p style="text-align: center; color: #e74c3c;">' + data.error + '</p>';
-            } else if (data.length === 0) {
-                content.innerHTML = '<p style="text-align: center;">No active borrowings. Student has not borrowed any books currently.</p>';
-            } else {
-                let html = '<table class="table" style="width: 100%; border-collapse: collapse;">';
-                html += '<thead style="background: #f7f7f7; font-weight: 600; color: #333;">';
-                html += '<tr>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Book Title</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Author</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">ISBN</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Category</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Borrow Date</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Due Date</th>';
-                html += '</tr>';
-                html += '</thead>';
-                html += '<tbody>';
-                
-                data.forEach(record => {
-                    html += '<tr style="transition: background-color 0.2s;">';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + escapeHtml(record.title) + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + escapeHtml(record.author) + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + (record.isbn || '-') + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + (record.category || '-') + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + record.borrow_date + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + record.due_date + '</td>';
-                    html += '</tr>';
-                });
-                
-                html += '</tbody>';
-                html += '</table>';
-                content.innerHTML = html;
-            }
-        })
-        .catch(error => {
-            content.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading active borrowings.</p>';
-        });
-}
-
-function viewLastRead(memberId, memberName) {
-    const modal = document.getElementById('historyModal');
-    const title = document.getElementById('historyTitle');
-    const content = document.getElementById('historyContent');
-    
-    title.textContent = '📚 Last Read Book - ' + memberName;
-    content.innerHTML = '<p style="text-align: center;">Loading...</p>';
-    modal.style.display = 'block';
-    
-    // Fetch last returned book via AJAX
-    fetch('get_member_history.php?member_id=' + memberId + '&last_read=1')
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                content.innerHTML = '<p style="text-align: center; color: #e74c3c;">' + data.error + '</p>';
-            } else if (data.length === 0) {
-                content.innerHTML = '<p style="text-align: center;">No reading history found.</p>';
-            } else {
-                let html = '<table class="table" style="width: 100%; border-collapse: collapse;">';
-                html += '<thead style="background: #f7f7f7; font-weight: 600; color: #333;">';
-                html += '<tr>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Book Title</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Author</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">ISBN</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Category</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Borrow Date</th>';
-                html += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Return Date</th>';
-                html += '</tr>';
-                html += '</thead>';
-                html += '<tbody>';
-                
-                data.forEach(record => {
-                    html += '<tr style="transition: background-color 0.2s;">';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + escapeHtml(record.title) + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + escapeHtml(record.author) + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + (record.isbn || '-') + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + (record.category || '-') + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + record.borrow_date + '</td>';
-                    html += '<td style="padding: 10px; border-bottom: 1px solid #eee;">' + (record.return_date || '-') + '</td>';
-                    html += '</tr>';
-                });
-                
-                html += '</tbody>';
-                html += '</table>';
-                content.innerHTML = html;
-            }
-        })
-        .catch(error => {
-            content.innerHTML = '<p style="text-align: center; color: #e74c3c;">Error loading last read book.</p>';
-        });
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 function editMember(memberId) {
-    // Fetch member data via AJAX and prefill the modal
     fetch('get_member.php?id=' + memberId)
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
-            if (data && !data.error) {
-                document.getElementById('memberModal').style.display = 'block';
-                document.querySelector('#memberModal h2').textContent = '✏️ Edit Member';
-                if (typeof isAdmin !== 'undefined' ? isAdmin : (window.isAdmin || false) || (typeof window !== 'undefined' && window.sessionStorage && sessionStorage.getItem('role') === 'admin') || (<?php echo is_staff() ? 'true' : 'false'; ?>)) {
-                    if (document.getElementById('first_name')) document.getElementById('first_name').value = data.first_name || '';
-                    if (document.getElementById('last_name')) document.getElementById('last_name').value = data.last_name || '';
-                    if (document.getElementById('group_name')) document.getElementById('group_name').value = data.group_name || '';
-                } else {
-                    if (document.getElementById('name')) document.getElementById('name').value = data.name;
-                }
-                document.getElementById('class').value = data.class || '';
-                document.getElementById('membership_date').value = data.membership_date;
-                // Add a hidden input for member ID
-                let idInput = document.getElementById('edit_member_id');
-                if (!idInput) {
-                    idInput = document.createElement('input');
-                    idInput.type = 'hidden';
-                    idInput.id = 'edit_member_id';
-                    idInput.name = 'edit_member_id';
-                    document.getElementById('memberForm').appendChild(idInput);
-                }
-                idInput.value = data.id;
-                // Populate class options and select the member's current class
-                populateClassOptions(data.class || '');
-            } else {
-                alert(data.error || 'Failed to load member data.');
+            if (!data || data.error) {
+                alert(data.error || 'Could not load this member.');
+                return;
             }
+            // Older rows may only have "name": split it into first/last
+            let first = data.first_name || '', last = data.last_name || '';
+            if (!first && !last && data.name) {
+                const parts = data.name.trim().split(/\s+/);
+                first = parts.shift();
+                last = parts.join(' ');
+            }
+            document.getElementById('memberForm').reset();
+            document.getElementById('edit_member_id').value = data.id;
+            document.getElementById('first_name').value = first;
+            document.getElementById('last_name').value = last;
+            document.getElementById('group_name').value = data.group_name || '';
+            document.getElementById('membership_date').value = data.membership_date || '';
+            document.getElementById('status').value = data.status || 'active';
+            document.getElementById('memberModalTitle').textContent = 'Edit ' + data.name;
+            document.getElementById('memberSubmit').textContent = 'Save changes';
+            populateClassOptions(data.class || '');
+            document.getElementById('memberModal').style.display = 'block';
         })
-        .catch(() => alert('Failed to load member data.'));
+        .catch(() => alert('Could not load this member.'));
 }
 
-function filterMembers() {
-    const filterValue = document.getElementById('statusFilter').value;
-    const rows = document.querySelectorAll('.table tbody tr');
-    
-    rows.forEach(row => {
-        if (row.querySelector('td') && row.querySelector('td').getAttribute('colspan')) {
-            // Skip "no members found" message row
-            return;
-        }
-        
-        const statusButton = row.querySelector('td:nth-child(4) button');
-        if (!statusButton) return;
-        
-        const isActive = statusButton.classList.contains('btn-success');
-        
-        if (filterValue === 'all') {
-            row.style.display = '';
-        } else if (filterValue === 'active' && isActive) {
-            row.style.display = '';
-        } else if (filterValue === 'inactive' && !isActive) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
-        }
-    });
-}
-
-// Fetch classes from server and populate dropdown
+// Class dropdown: generated classes + extra classes + the member's current class
 function populateClassOptions(selectedValue) {
+    const sel = document.getElementById('class');
     fetch('get_classes.php?t=' + Date.now())
         .then(r => r.json())
         .then(data => {
-            const sel = document.getElementById('class');
-            if (!sel) return;
-            sel.innerHTML = '';
-            // Placeholder
-            const opt0 = document.createElement('option');
-            opt0.value = '';
-            opt0.textContent = 'Select class';
-            sel.appendChild(opt0);
-
-            (data.classes || []).forEach(cls => {
-                const opt = document.createElement('option');
-                opt.value = cls.value; // e.g., 10A
-                opt.textContent = cls.label; // e.g., Grade 10A
-                if (selectedValue && (selectedValue === cls.value || selectedValue === cls.label)) {
-                    opt.selected = true;
-                }
-                sel.appendChild(opt);
+            sel.innerHTML = '<option value="">No class</option>';
+            const values = new Set();
+            (data.classes || []).forEach(c => {
+                values.add(c.value);
+                sel.add(new Option(c.label, c.value));
             });
-
-            const ay = document.getElementById('ayLabel');
-            if (ay && data.academicYear) {
-                ay.textContent = 'Academic Year: ' + data.academicYear;
+            // Keep classes that came from a CSV import (e.g. "Year 10A - Oxford")
+            if (selectedValue && !values.has(selectedValue)) {
+                sel.add(new Option(selectedValue, selectedValue), 1);
             }
+            sel.value = selectedValue || '';
+            document.getElementById('ayLabel').textContent = data.academicYear ? 'School year ' + data.academicYear : '';
         })
         .catch(() => {
-            const sel = document.getElementById('class');
-            if (sel) sel.innerHTML = '<option value="">Unable to load classes</option>';
+            sel.innerHTML = '';
+            sel.add(new Option(selectedValue || 'No class', selectedValue || ''));
         });
 }
 
-// Close history modal when clicking outside
-window.addEventListener('click', function(event) {
-    const historyModal = document.getElementById('historyModal');
-    if (event.target == historyModal) {
-        closeHistoryModal();
-    }
-});
+// ---------- Import ----------
+function openImportModal() { document.getElementById('importModal').style.display = 'block'; }
+function closeImportModal() { document.getElementById('importModal').style.display = 'none'; }
 
-// Class Manager Modal logic
+// ---------- Classes ----------
 function openClassManagerModal() {
+    document.getElementById('classManagerMsg').textContent = '';
     document.getElementById('classManagerModal').style.display = 'block';
     loadClassConfig();
 }
 
 function closeClassManagerModal() {
     document.getElementById('classManagerModal').style.display = 'none';
-    document.getElementById('classManagerMsg').textContent = '';
 }
 
 function loadClassConfig() {
@@ -916,41 +658,31 @@ function loadClassConfig() {
 
 function saveClassConfig(e) {
     e.preventDefault();
-    const min = parseInt(document.getElementById('minGradeInput').value);
-    const max = parseInt(document.getElementById('maxGradeInput').value);
-    const sections = document.getElementById('sectionsInput').value.split(',').map(s => s.trim()).filter(Boolean);
-    const startMonth = parseInt(document.getElementById('startMonthInput').value);
+    const msg = document.getElementById('classManagerMsg');
+    const say = (text, ok) => { msg.textContent = text; msg.style.color = ok ? 'var(--success)' : 'var(--danger)'; };
     let overrides = {};
-    const overridesRaw = document.getElementById('overridesInput').value.trim();
-    if (overridesRaw) {
-        try { overrides = JSON.parse(overridesRaw); } catch(e) {
-            document.getElementById('classManagerMsg').textContent = 'Invalid JSON in overrides.';
-            return false;
-        }
+    const raw = document.getElementById('overridesInput').value.trim();
+    if (raw) {
+        try { overrides = JSON.parse(raw); } catch (err) { say('The year changes are not valid JSON.', false); return false; }
     }
     fetch('update_classes.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ min_grade: min, max_grade: max, sections, start_month: startMonth, year_overrides: overrides })
+        body: JSON.stringify({
+            min_grade: parseInt(document.getElementById('minGradeInput').value),
+            max_grade: parseInt(document.getElementById('maxGradeInput').value),
+            sections: document.getElementById('sectionsInput').value.split(',').map(s => s.trim()).filter(Boolean),
+            start_month: parseInt(document.getElementById('startMonthInput').value),
+            year_overrides: overrides
+        })
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            document.getElementById('classManagerMsg').style.color = '#2e7d32';
-            document.getElementById('classManagerMsg').textContent = 'Class configuration updated!';
-            populateClassOptions('');
-            setTimeout(() => { closeClassManagerModal(); }, 1200);
-        } else {
-            document.getElementById('classManagerMsg').style.color = '#c62828';
-            document.getElementById('classManagerMsg').textContent = data.error || 'Failed to update.';
-        }
-    })
-    .catch(() => {
-        document.getElementById('classManagerMsg').style.color = '#c62828';
-        document.getElementById('classManagerMsg').textContent = 'Failed to update.';
-    });
+        .then(r => r.json())
+        .then(data => data.success ? say('Saved.', true) : say(data.error || 'Could not save.', false))
+        .catch(() => say('Could not save.', false));
     return false;
 }
+
+applyMemberFilters();
 </script>
 
 <?php include 'includes/footer.php'; ?>

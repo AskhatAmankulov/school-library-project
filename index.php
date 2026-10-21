@@ -1,5 +1,10 @@
 <?php
 session_start();
+// Visitors who are not logged in see the welcome page first
+if (!isset($_SESSION['user_id'])) {
+    header('Location: landing.php');
+    exit();
+}
 include 'auth_check.php';
 include 'config.php';
 $page_title = 'Dashboard';

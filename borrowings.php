@@ -3,662 +3,438 @@ session_start();
 include 'auth_check.php';
 require_staff();
 include 'config.php';
-include 'includes/header.php';
 
-// Handle form submissions
+// ---------- Issue / return ----------
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
-    if (isset($_POST['action'])) {
-        if ($_POST['action'] == 'borrow') {
-            $member_id = (int)$_POST['member_id'];
-            $book_id = (int)$_POST['book_id'];
-            $borrow_date = $_POST['borrow_date'];
-            $due_date = $_POST['due_date'];
-            
-            // Check available quantity
-            $book_check = $conn->query("SELECT available_quantity FROM books WHERE id=$book_id");
-            $book = $book_check->fetch_assoc();
-            
-            if ($book && $book['available_quantity'] > 0) {
-                $stmt = $conn->prepare("INSERT INTO borrowings (member_id, book_id, borrow_date, due_date, status) VALUES (?, ?, ?, ?, 'active')");
-                $stmt->bind_param("iiss", $member_id, $book_id, $borrow_date, $due_date);
-                
-                if ($stmt->execute()) {
-                    $conn->query("UPDATE books SET available_quantity = available_quantity - 1 WHERE id=$book_id");
-                    $_SESSION['success_message'] = "Book borrowed successfully!";
-                } else {
-                    $_SESSION['error_message'] = "Error: " . $conn->error;
-                }
-                $stmt->close();
-            } else {
-                $_SESSION['error_message'] = "This book is not available!";
-            }
-        } elseif ($_POST['action'] == 'return') {
-            $borrowing_id = (int)$_POST['borrowing_id'];
-            
-            // Get book_id from borrowing
-            $borrowing_check = $conn->query("SELECT book_id FROM borrowings WHERE id=$borrowing_id");
-            $borrowing = $borrowing_check->fetch_assoc();
-            $book_id = $borrowing['book_id'];
-            
-            $stmt = $conn->prepare("UPDATE borrowings SET status='returned', return_date=CURDATE() WHERE id=?");
-            $stmt->bind_param("i", $borrowing_id);
-            
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'borrow') {
+        $member_id = (int)($_POST['member_id'] ?? 0);
+        $book_id = (int)($_POST['book_id'] ?? 0);
+        $borrow_date = $_POST['borrow_date'] ?? date('Y-m-d');
+        $due_date = $_POST['due_date'] ?? date('Y-m-d', strtotime('+14 days'));
+
+        $stmt = $conn->prepare("SELECT title, available_quantity FROM books WHERE id = ?");
+        $stmt->bind_param("i", $book_id);
+        $stmt->execute();
+        $book = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$member_id || !$book) {
+            $_SESSION['error_message'] = 'Choose a student and a book.';
+        } elseif ($book['available_quantity'] <= 0) {
+            $_SESSION['error_message'] = '"' . $book['title'] . '" has no copies left to lend.';
+        } elseif (strtotime($due_date) <= strtotime($borrow_date)) {
+            $_SESSION['error_message'] = 'The due date must be after the borrow date.';
+        } else {
+            $stmt = $conn->prepare("INSERT INTO borrowings (member_id, book_id, borrow_date, due_date, status) VALUES (?, ?, ?, ?, 'active')");
+            $stmt->bind_param("iiss", $member_id, $book_id, $borrow_date, $due_date);
             if ($stmt->execute()) {
-                $conn->query("UPDATE books SET available_quantity = available_quantity + 1 WHERE id=$book_id");
-                $_SESSION['success_message'] = "Book returned successfully!";
+                $conn->query("UPDATE books SET available_quantity = available_quantity - 1 WHERE id = $book_id");
+                $_SESSION['success_message'] = 'Issued "' . $book['title'] . '". Due ' . date('M j', strtotime($due_date)) . '.';
             } else {
-                $_SESSION['error_message'] = "Error: " . $conn->error;
+                $_SESSION['error_message'] = 'Could not issue the book: ' . $conn->error;
             }
             $stmt->close();
         }
+    } elseif ($action === 'return') {
+        $borrowing_id = (int)($_POST['borrowing_id'] ?? 0);
+
+        // Only an active loan can be returned (a double click must not add a copy twice)
+        $stmt = $conn->prepare("UPDATE borrowings SET status = 'returned', return_date = CURDATE() WHERE id = ? AND status = 'active'");
+        $stmt->bind_param("i", $borrowing_id);
+        $stmt->execute();
+        $changed = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($changed === 1) {
+            $conn->query("UPDATE books b JOIN borrowings br ON br.book_id = b.id
+                          SET b.available_quantity = b.available_quantity + 1 WHERE br.id = $borrowing_id");
+            $_SESSION['success_message'] = 'Marked as returned.';
+        } else {
+            $_SESSION['error_message'] = 'This loan was already returned.';
+        }
     }
-    
-    header("Location: borrowings.php");
+
+    header("Location: borrowings.php" . (isset($_POST['filter']) ? '?filter=' . urlencode($_POST['filter']) : ''));
     exit();
+}
+
+$page_title = 'Borrowings';
+include 'includes/header.php';
+
+// ---------- Data ----------
+$rows = [];
+$counts = ['active' => 0, 'overdue' => 0, 'returned' => 0, 'all' => 0];
+$due_this_week = 0;
+$returned_today = 0;
+
+if (!$db_error && $conn) {
+    $result = $conn->query("SELECT br.id, br.borrow_date, br.due_date, br.return_date, br.status,
+                                   b.title, b.author, m.id AS member_id, m.name AS member_name, m.class,
+                                   DATEDIFF(CURDATE(), br.due_date) AS days_overdue
+                            FROM borrowings br
+                            JOIN books b ON br.book_id = b.id
+                            JOIN members m ON br.member_id = m.id
+                            ORDER BY (br.status = 'active') DESC, br.due_date ASC, br.return_date DESC");
+    if ($result) {
+        $rows = $result->fetch_all(MYSQLI_ASSOC);
+    }
+    foreach ($rows as $r) {
+        $counts['all']++;
+        if ($r['status'] === 'active') {
+            $counts['active']++;
+            if ($r['days_overdue'] > 0) {
+                $counts['overdue']++;
+            } elseif ($r['days_overdue'] >= -7) {
+                $due_this_week++;
+            }
+        } else {
+            $counts['returned']++;
+            if ($r['return_date'] === date('Y-m-d')) {
+                $returned_today++;
+            }
+        }
+    }
+}
+
+$filter = $_GET['filter'] ?? 'active';
+if (!isset($counts[$filter])) {
+    $filter = 'active';
 }
 ?>
 
-<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 35px; margin: -20px -20px 30px -20px; border-radius: 0 0 20px 20px; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);">
-    <h1 style="color: white; margin: 0; display: flex; align-items: center; gap: 12px; font-size: 2rem; text-shadow: 0 2px 4px rgba(0,0,0,0.2);"><span style="font-size: 2.2rem;">📖</span> Borrowings Management</h1>
-    <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 1.05rem;">Manage all book borrowings and returns</p>
+<div class="page-header">
+    <div>
+        <h1>Borrowings</h1>
+        <p>Issue books to students and record returns.</p>
+    </div>
+    <button class="btn btn-primary" onclick="openBorrowModal()"><?php echo icon('plus', 16); ?>Issue a book</button>
 </div>
 
 <?php
-// Display success/error messages
-if (isset($_SESSION['success_message'])) {
-    echo '<div class="alert alert-success" style="border-radius: 12px; border-left: 4px solid #4CAF50; background: #e8f5e9; color: #2e7d32; padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2); animation: slideIn 0.3s ease-out;">' . htmlspecialchars($_SESSION['success_message']) . '</div>';
-    unset($_SESSION['success_message']);
-}
-if (isset($_SESSION['error_message'])) {
-    echo '<div class="alert alert-danger" style="border-radius: 12px; border-left: 4px solid #f44336; background: #ffebee; color: #c62828; padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(244, 67, 54, 0.2); animation: slideIn 0.3s ease-out;">' . htmlspecialchars($_SESSION['error_message']) . '</div>';
-    unset($_SESSION['error_message']);
+foreach (['success_message' => ['alert-success', 'check-circle'], 'error_message' => ['alert-danger', 'alert']] as $key => [$cls, $ic]) {
+    if (isset($_SESSION[$key])) {
+        echo '<div class="alert ' . $cls . '">' . icon($ic, 16) . htmlspecialchars($_SESSION[$key]) . '</div>';
+        unset($_SESSION[$key]);
+    }
 }
 if ($db_error) {
-    echo '<div class="alert alert-danger" style="border-radius: 12px; border-left: 4px solid #f44336; background: #ffebee; color: #c62828; padding: 15px 20px; margin-bottom: 20px;">Database connection error. Please check your configuration.</div>';
+    echo '<div class="alert alert-danger">' . icon('alert', 16) . 'Cannot connect to the database. Start MySQL in XAMPP.</div>';
 }
 ?>
 
-<div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin-bottom: 25px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-        <h2 style="margin: 0; color: #333; font-size: 1.5rem; display: flex; align-items: center; gap: 10px;"><span style="color: #667eea; font-size: 1.3rem;">📋</span> Borrowings List</h2>
-        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-            <label for="statusFilter" style="font-weight: 600; color: #555; display: flex; align-items: center; gap: 8px;"><span style="font-size: 0.9rem;">🔍</span> Filter:</label>
-            <select id="statusFilter" onchange="filterBorrowings()" style="padding: 10px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; background: white; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='#667eea'" onmouseout="this.style.borderColor='#e0e0e0'">
-                <option value="all">All Borrowings</option>
-                <option value="active" selected>Active Only</option>
-                <option value="returned">Returned Only</option>
-                <option value="overdue">Overdue Only</option>
-            </select>
-            <button onclick="openBorrowModal()" class="btn btn-success" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(76,175,80,0.3); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(76,175,80,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(76,175,80,0.3)'">➕ New Borrowing</button>
-        </div>
+<div class="stats-strip">
+    <div class="stat">
+        <div class="stat-label"><?php echo icon('book-open', 15); ?>On loan</div>
+        <div class="stat-value"><?php echo $counts['active']; ?></div>
+        <div class="stat-note">books out right now</div>
+    </div>
+    <div class="stat <?php echo $counts['overdue'] > 0 ? 'is-alert' : ''; ?>">
+        <div class="stat-label"><?php echo icon('alert', 15); ?>Overdue</div>
+        <div class="stat-value"><?php echo $counts['overdue']; ?></div>
+        <div class="stat-note">past the due date</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label"><?php echo icon('clock', 15); ?>Due this week</div>
+        <div class="stat-value"><?php echo $due_this_week; ?></div>
+        <div class="stat-note">in the next 7 days</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label"><?php echo icon('check-circle', 15); ?>Returned today</div>
+        <div class="stat-value"><?php echo $returned_today; ?></div>
+        <div class="stat-note"><?php echo date('M j'); ?></div>
     </div>
 </div>
 
-<!-- Borrow Modal -->
-<!-- Borrow Modal -->
-<div id="borrowModal" class="modal">
-    <div class="modal-content" style="border-radius: 16px; max-width: 550px; padding: 0; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px 30px; position: relative;">
-            <h2 style="margin: 0; color: white; display: flex; align-items: center; gap: 10px; font-size: 1.6rem;">📖 Borrow a Book</h2>
-            <span class="modal-close" onclick="closeBorrowModal()" style="position: absolute; top: 20px; right: 25px; color: white; font-size: 2rem; opacity: 0.9; cursor: pointer;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">&times;</span>
+<section class="panel">
+    <div class="toolbar">
+        <div class="segmented" role="tablist" aria-label="Filter loans">
+            <?php foreach (['active' => 'On loan', 'overdue' => 'Overdue', 'returned' => 'Returned', 'all' => 'All'] as $key => $label): ?>
+                <button type="button" data-filter="<?php echo $key; ?>" class="<?php echo $filter === $key ? 'active' : ''; ?>" onclick="setFilter('<?php echo $key; ?>')">
+                    <?php echo $label; ?> <span class="seg-count"><?php echo $counts[$key]; ?></span>
+                </button>
+            <?php endforeach; ?>
         </div>
-        <form method="POST" action="" id="borrowForm" style="padding: 30px;">
+        <div class="search-input">
+            <?php echo icon('search', 16); ?>
+            <input type="search" id="loanSearch" placeholder="Search book or student" oninput="applyFilters()">
+        </div>
+    </div>
+
+    <div class="table-scroll">
+        <table class="data-table" id="loansTable">
+            <thead>
+                <tr>
+                    <th>Book</th>
+                    <th>Student</th>
+                    <th class="hide-sm">Borrowed</th>
+                    <th>Due</th>
+                    <th class="hide-sm">Status</th>
+                    <th class="actions"><span class="hide-sm">Action</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($rows as $r):
+                    $is_overdue = $r['status'] === 'active' && $r['days_overdue'] > 0;
+                    $days_left = -(int)$r['days_overdue'];
+                    $search_text = strtolower($r['title'] . ' ' . $r['author'] . ' ' . $r['member_name'] . ' ' . $r['class']);
+                ?>
+                    <tr class="loan-row <?php echo $is_overdue ? 'is-overdue' : ''; ?>"
+                        data-status="<?php echo $r['status']; ?>"
+                        data-overdue="<?php echo $is_overdue ? '1' : '0'; ?>"
+                        data-search="<?php echo htmlspecialchars($search_text); ?>">
+                        <td>
+                            <div class="cell-main"><?php echo htmlspecialchars($r['title']); ?></div>
+                            <div class="cell-sub"><?php echo htmlspecialchars($r['author']); ?></div>
+                        </td>
+                        <td>
+                            <a class="cell-main" style="text-decoration: none;" href="profile.php?id=<?php echo (int)$r['member_id']; ?>"><?php echo htmlspecialchars($r['member_name']); ?></a>
+                            <?php if (!empty($r['class'])): ?>
+                                <div class="cell-sub"><?php echo htmlspecialchars($r['class']); ?></div>
+                            <?php endif; ?>
+                        </td>
+                        <td class="muted hide-sm"><?php echo date('M j, Y', strtotime($r['borrow_date'])); ?></td>
+                        <td>
+                            <div class="nowrap"><?php echo date('M j, Y', strtotime($r['due_date'])); ?></div>
+                            <?php if ($r['status'] === 'active'): ?>
+                                <div class="cell-sub" style="color: <?php echo $is_overdue ? 'var(--danger)' : ($days_left <= 3 ? 'var(--warning)' : 'var(--muted)'); ?>">
+                                    <?php
+                                    if ($is_overdue) {
+                                        echo (int)$r['days_overdue'] . ' day' . ($r['days_overdue'] > 1 ? 's' : '') . ' late';
+                                    } elseif ($days_left === 0) {
+                                        echo 'Due today';
+                                    } else {
+                                        echo 'in ' . $days_left . ' day' . ($days_left > 1 ? 's' : '');
+                                    }
+                                    ?>
+                                </div>
+                            <?php endif; ?>
+                        </td>
+                        <td class="hide-sm">
+                            <?php if ($r['status'] === 'returned'): ?>
+                                <span class="badge badge-neutral">Returned <?php echo date('M j', strtotime($r['return_date'])); ?></span>
+                            <?php elseif ($is_overdue): ?>
+                                <span class="badge badge-danger">Overdue</span>
+                            <?php else: ?>
+                                <span class="badge badge-success">On loan</span>
+                            <?php endif; ?>
+                        </td>
+                        <td class="actions">
+                            <?php if ($r['status'] === 'active'): ?>
+                                <form method="POST" onsubmit="return confirm('Mark &quot;<?php echo htmlspecialchars(addslashes($r['title'])); ?>&quot; as returned?');">
+                                    <input type="hidden" name="action" value="return">
+                                    <input type="hidden" name="borrowing_id" value="<?php echo (int)$r['id']; ?>">
+                                    <input type="hidden" name="filter" class="filter-field" value="<?php echo htmlspecialchars($filter); ?>">
+                                    <button type="submit" class="btn btn-outline btn-small" title="Mark as returned"><?php echo icon('check', 14); ?><span class="hide-sm">Returned</span></button>
+                                </form>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <div class="empty" id="loansEmpty" style="display: none;">
+        <strong>No loans here</strong>
+        <span id="loansEmptyText">Try another filter or search.</span>
+    </div>
+</section>
+
+<!-- Issue a book -->
+<div id="borrowModal" class="modal">
+    <div class="modal-content has-parts modal-sm">
+        <div class="modal-header">
+            <h2><?php echo icon('book-open', 18); ?>Issue a book</h2>
+            <button type="button" class="icon-button" onclick="closeBorrowModal()" aria-label="Close"><?php echo icon('x', 18); ?></button>
+        </div>
+        <form method="POST" action="" id="borrowForm" onsubmit="return validateBorrowForm()">
             <input type="hidden" name="action" value="borrow">
-            
-            <!-- Member Input Option 1: Search -->
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Member *</label>
-                <div style="margin-bottom: 10px;">
-                    <div style="position: relative;">
-                        <input type="text" id="memberSearch" placeholder="🔍 Search member by name..." style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'; searchMembers();" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'" oninput="searchMembers()">
-                        <div id="memberSearchResults" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 2px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px; max-height: 250px; overflow-y: auto; display: none; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                        </div>
+            <input type="hidden" name="filter" class="filter-field" value="<?php echo htmlspecialchars($filter); ?>">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="memberSearch">Student</label>
+                    <div class="combobox">
+                        <input type="text" id="memberSearch" class="input" placeholder="Type a name or class" autocomplete="off"
+                               onfocus="searchMembers()" oninput="clearSelection('member'); searchMembers()">
+                        <div id="memberSearchResults" class="combo-results"></div>
                     </div>
                     <input type="hidden" name="member_id" id="member_id">
+                    <div id="selectedMember" class="selection"><?php echo icon('check', 14); ?><span id="selectedMemberText"></span></div>
                 </div>
-                <div id="selectedMember" style="padding: 10px 12px; background: #f0f4ff; border-radius: 8px; border: 2px solid transparent; display: none; color: #333; font-weight: 500;">
-                    ✅ <span id="selectedMemberText"></span>
-                </div>
-            </div>
-            
-            <!-- Book Input Option 2: Search -->
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Book *</label>
-                <div style="margin-bottom: 10px;">
-                    <div style="position: relative;">
-                        <input type="text" id="bookSearch" placeholder="🔍 Search book by title or author..." style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onfocus="this.style.borderColor='#667eea'; this.style.boxShadow='0 0 0 3px rgba(102,126,234,0.1)'; searchBooks();" onblur="this.style.borderColor='#e0e0e0'; this.style.boxShadow='none'" oninput="searchBooks()">
-                        <div id="bookSearchResults" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 2px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px; max-height: 250px; overflow-y: auto; display: none; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                        </div>
+
+                <div class="form-group">
+                    <label for="bookSearch">Book</label>
+                    <div class="combobox">
+                        <input type="text" id="bookSearch" class="input" placeholder="Type a title or author" autocomplete="off"
+                               onfocus="searchBooks()" oninput="clearSelection('book'); searchBooks()">
+                        <div id="bookSearchResults" class="combo-results"></div>
                     </div>
                     <input type="hidden" name="book_id" id="book_id">
+                    <div id="selectedBook" class="selection"><?php echo icon('check', 14); ?><span id="selectedBookText"></span></div>
+                    <p class="form-hint">Only books with a free copy are listed.</p>
                 </div>
-                <div id="selectedBook" style="padding: 10px 12px; background: #f0f4ff; border-radius: 8px; border: 2px solid transparent; display: none; color: #333; font-weight: 500;">
-                    ✅ <span id="selectedBookText"></span>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="borrow_date">Borrowed on</label>
+                        <input type="date" name="borrow_date" id="borrow_date" required value="<?php echo date('Y-m-d'); ?>">
+                    </div>
+                    <div class="form-group">
+                        <label for="due_date">Due on</label>
+                        <input type="date" name="due_date" id="due_date" required value="<?php echo date('Y-m-d', strtotime('+14 days')); ?>">
+                    </div>
                 </div>
+                <p class="form-hint" id="formError" style="color: var(--danger); display: none;"></p>
             </div>
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label for="borrow_date" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Borrow Date *</label>
-                <input type="date" name="borrow_date" id="borrow_date" required value="<?php echo date('Y-m-d'); ?>" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;">
-            </div>
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label for="due_date" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">Due Date *</label>
-                <input type="date" name="due_date" id="due_date" required value="<?php echo date('Y-m-d', strtotime('+14 days')); ?>" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;">
-            </div>
-            <div style="display: flex; gap: 12px; margin-top: 25px;">
-                <button type="submit" class="btn btn-primary" onclick="return validateBorrowForm()" style="flex: 1; padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 10px; color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.3)'">📖 Borrow Book</button>
-                <button type="button" class="btn btn-secondary" onclick="closeBorrowModal()" style="padding: 12px 24px; background: #e0e0e0; border: none; border-radius: 10px; color: #666; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.3s;" onmouseover="this.style.background='#d0d0d0'" onmouseout="this.style.background='#e0e0e0'">Cancel</button>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline" onclick="closeBorrowModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Issue book</button>
             </div>
         </form>
     </div>
 </div>
 
-<table class="table" style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08);">
-    <thead>
-        <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-            <th style="color: white; padding: 15px; text-align: left; font-weight: 600; border-radius: 12px 0 0 0;">Book Title</th>
-            <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Author</th>
-            <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Member Name</th>
-            <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Borrow Date</th>
-            <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Due Date</th>
-            <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Return Date</th>
-            <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Status</th>
-            <th style="color: white; padding: 15px; text-align: left; font-weight: 600; border-radius: 0 12px 0 0;">Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-        <?php
-        if (!$db_error && $conn) {
-            $sql = "SELECT br.id, br.borrow_date, br.due_date, br.return_date, br.status,
-                    b.title, b.author, m.name as member_name, m.class,
-                    DATEDIFF(CURDATE(), br.due_date) as days_overdue
-                    FROM borrowings br
-                    JOIN books b ON br.book_id = b.id
-                    JOIN members m ON br.member_id = m.id
-                    ORDER BY br.borrow_date DESC";
-            
-            $result = $conn->query($sql);
-            
-            if ($result && $result->num_rows > 0) {
-                while ($row = $result->fetch_assoc()) {
-                    $is_overdue = $row['status'] === 'active' && $row['days_overdue'] > 0;
-                    $status_class = $row['status'] === 'returned' ? 'status-returned' : ($is_overdue ? 'status-overdue' : 'status-active');
-                    $status_text = $row['status'] === 'returned' ? '✅ Returned' : ($is_overdue ? '⚠️ Overdue' : '📖 Active');
-                    $row_class = $is_overdue ? 'overdue-row' : '';
-                    
-                    echo "<tr class='borrowing-row " . $row_class . "' data-status='" . $row['status'] . "' data-overdue='" . ($is_overdue ? '1' : '0') . "' style='transition: all 0.2s; border-bottom: 1px solid #f0f0f0;' onmouseover='this.style.backgroundColor=\"#f8f9fa\"; this.style.transform=\"scale(1.01)\"' onmouseout='this.style.backgroundColor=\"\"; this.style.transform=\"scale(1)\"'>";
-                    echo "<td style='padding: 15px; font-weight: 500; color: #333;'>" . htmlspecialchars($row['title']) . "</td>";
-                    echo "<td style='padding: 15px; color: #666;'>" . htmlspecialchars($row['author']) . "</td>";
-                    echo "<td style='padding: 15px; color: #666;'>" . htmlspecialchars($row['member_name']) . ($row['class'] ? ' (' . htmlspecialchars($row['class']) . ')' : '') . "</td>";
-                    echo "<td style='padding: 15px; color: #555;'>" . date('M d, Y', strtotime($row['borrow_date'])) . "</td>";
-                    echo "<td style='padding: 15px; color: #555;'>" . date('M d, Y', strtotime($row['due_date'])) . "</td>";
-                    echo "<td style='padding: 15px; color: #555;'>" . ($row['return_date'] ? date('M d, Y', strtotime($row['return_date'])) : '-') . "</td>";
-                    echo "<td style='padding: 15px;'><span class='status-badge " . $status_class . "'>" . $status_text . "</span></td>";
-                    echo "<td style='padding: 15px;'>";
-                    if ($row['status'] === 'active') {
-                        echo "<form method='POST' style='display:inline;' onsubmit='return confirm(\"Confirm return of this book?\");'><input type='hidden' name='action' value='return'><input type='hidden' name='borrowing_id' value='" . $row['id'] . "'><button type='submit' class='btn btn-small btn-success' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; transition: all 0.2s;' onmouseover='this.style.transform=\"scale(1.05)\"' onmouseout='this.style.transform=\"scale(1)\"'>✅ Return</button></form>";
-                    } else {
-                        echo "<span style='color: #999; font-size: 0.85rem;'>Already returned</span>";
-                    }
-                    echo "</td>";
-                    echo "</tr>";
-                }
-            } else {
-                echo "<tr><td colspan='8' style='text-align:center; padding: 60px 20px; color: #999;'><div style='font-size: 3rem; margin-bottom: 15px; opacity: 0.3;'>📖</div><p style='font-size: 1.1rem; margin: 0;'>No borrowings found. Click 'New Borrowing' to add one!</p></td></tr>";
-            }
-        } else {
-            echo "<tr><td colspan='8' style='text-align:center; padding: 40px 20px; color: #e74c3c; font-weight: 500;'>Database connection error.</td></tr>";
-        }
-        ?>
-    </tbody>
-</table>
-
-<!-- Statistics Panel -->
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-top: 30px;">
-    <?php
-    if (!$db_error && $conn) {
-        // Total Active Borrowings
-        $activeResult = $conn->query("SELECT COUNT(*) as count FROM borrowings WHERE status='active'");
-        $activeCount = ($activeResult && $activeResult->num_rows > 0) ? $activeResult->fetch_assoc()['count'] : 0;
-        
-        // Total Overdue
-        $overdueResult = $conn->query("SELECT COUNT(*) as count FROM borrowings WHERE status='active' AND due_date < CURDATE()");
-        $overdueCount = ($overdueResult && $overdueResult->num_rows > 0) ? $overdueResult->fetch_assoc()['count'] : 0;
-        
-        // Returned Today
-        $todayResult = $conn->query("SELECT COUNT(*) as count FROM borrowings WHERE status='returned' AND return_date = CURDATE()");
-        $todayCount = ($todayResult && $todayResult->num_rows > 0) ? $todayResult->fetch_assoc()['count'] : 0;
-        
-        // Total Books Out (count active borrowings)
-        $totalBooksResult = $conn->query("SELECT COUNT(*) as count FROM borrowings WHERE status='active'");
-        $totalBooksOut = ($totalBooksResult && $totalBooksResult->num_rows > 0) ? $totalBooksResult->fetch_assoc()['count'] : 0;
-        
-        echo "<div style='background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <div style='display: flex; align-items: center; gap: 12px; margin-bottom: 10px;'>
-                <span style='font-size: 2rem;'>📚</span>
-                <h3 style='margin: 0; color: #1565c0; font-size: 1rem;'>Active Borrowings</h3>
-            </div>
-            <p style='font-size: 2rem; font-weight: 700; color: #0d47a1; margin: 0;'>" . $activeCount . "</p>
-        </div>";
-        
-        echo "<div style='background: linear-gradient(135deg, #fff3cd 0%, #ffe0b2 100%); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <div style='display: flex; align-items: center; gap: 12px; margin-bottom: 10px;'>
-                <span style='font-size: 2rem;'>⚠️</span>
-                <h3 style='margin: 0; color: #e65100; font-size: 1rem;'>Overdue Books</h3>
-            </div>
-            <p style='font-size: 2rem; font-weight: 700; color: #bf360c; margin: 0;'>" . $overdueCount . "</p>
-        </div>";
-        
-        echo "<div style='background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <div style='display: flex; align-items: center; gap: 12px; margin-bottom: 10px;'>
-                <span style='font-size: 2rem;'>✅</span>
-                <h3 style='margin: 0; color: #2e7d32; font-size: 1rem;'>Returned Today</h3>
-            </div>
-            <p style='font-size: 2rem; font-weight: 700; color: #1b5e20; margin: 0;'>" . $todayCount . "</p>
-        </div>";
-        
-        echo "<div style='background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <div style='display: flex; align-items: center; gap: 12px; margin-bottom: 10px;'>
-                <span style='font-size: 2rem;'>📖</span>
-                <h3 style='margin: 0; color: #6a1b9a; font-size: 1rem;'>Total Books Out</h3>
-            </div>
-            <p style='font-size: 2rem; font-weight: 700; color: #4a148c; margin: 0;'>" . $totalBooksOut . "</p>
-        </div>";
-    }
-    ?>
-</div>
-
 <script>
+let currentFilter = <?php echo json_encode($filter); ?>;
+let allMembers = [];
+let allBooks = [];
+
+// ---------- Filters ----------
+function setFilter(name) {
+    currentFilter = name;
+    document.querySelectorAll('.segmented button').forEach(b => b.classList.toggle('active', b.dataset.filter === name));
+    document.querySelectorAll('.filter-field').forEach(f => f.value = name);
+    history.replaceState(null, '', '?filter=' + name);
+    applyFilters();
+}
+
+function applyFilters() {
+    const q = document.getElementById('loanSearch').value.trim().toLowerCase();
+    let visible = 0;
+    document.querySelectorAll('.loan-row').forEach(row => {
+        const status = row.dataset.status;
+        const overdue = row.dataset.overdue === '1';
+        let show = currentFilter === 'all'
+            || (currentFilter === 'active' && status === 'active')
+            || (currentFilter === 'returned' && status === 'returned')
+            || (currentFilter === 'overdue' && overdue);
+        if (show && q) {
+            show = row.dataset.search.includes(q);
+        }
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    document.getElementById('loansEmpty').style.display = visible ? 'none' : 'block';
+    document.getElementById('loansTable').style.display = visible ? '' : 'none';
+    document.getElementById('loansEmptyText').textContent = q
+        ? 'Nothing matches "' + q + '".'
+        : (currentFilter === 'overdue' ? 'Every book on loan is within its due date.' : 'Try another filter.');
+}
+
+// ---------- Issue modal ----------
 function openBorrowModal() {
-    const modal = document.getElementById('borrowModal');
-    if (modal) {
-        modal.style.display = 'block';
+    document.getElementById('borrowForm').reset();
+    clearSelection('member');
+    clearSelection('book');
+    document.getElementById('formError').style.display = 'none';
+    document.getElementById('borrowModal').style.display = 'block';
+    if (!allMembers.length) {
+        fetch('get_all_members.php').then(r => r.json()).then(d => { allMembers = Array.isArray(d) ? d : []; }).catch(() => {});
     }
-    // Reset search fields
-    document.getElementById('memberSearch').value = '';
-    document.getElementById('bookSearch').value = '';
-    document.getElementById('selectedMember').style.display = 'none';
-    document.getElementById('selectedBook').style.display = 'none';
-    document.getElementById('member_id').value = '';
-    document.getElementById('book_id').value = '';
-    // Set default dates
-    document.getElementById('borrow_date').value = new Date().toISOString().split('T')[0];
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 14);
-    document.getElementById('due_date').value = dueDate.toISOString().split('T')[0];
-    
-    // Load all members and books initially
-    loadAllMembers();
-    loadAllBooks();
+    fetch('get_all_books.php').then(r => r.json()).then(d => { allBooks = Array.isArray(d) ? d : []; }).catch(() => {});
+    setTimeout(() => document.getElementById('memberSearch').focus(), 50);
 }
 
 function closeBorrowModal() {
     document.getElementById('borrowModal').style.display = 'none';
-    document.getElementById('borrowForm').reset();
+    hideResults();
+}
+
+function hideResults() {
     document.getElementById('memberSearchResults').style.display = 'none';
     document.getElementById('bookSearchResults').style.display = 'none';
-    document.getElementById('selectedMember').style.display = 'none';
-    document.getElementById('selectedBook').style.display = 'none';
 }
 
-window.onclick = function(event) {
-    const modal = document.getElementById('borrowModal');
-    if (event.target == modal) {
-        closeBorrowModal();
-    }
+function clearSelection(kind) {
+    document.getElementById(kind + '_id').value = '';
+    const box = document.getElementById(kind === 'member' ? 'selectedMember' : 'selectedBook');
+    box.classList.remove('show');
 }
 
-// Store all members and books for client-side filtering
-let allMembers = [];
-let allBooks = [];
-
-// Load all members
-function loadAllMembers() {
-    fetch('get_all_members.php')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Failed to load members');
-            }
-            return response.json();
-        })
-        .then(members => {
-            allMembers = members;
-            displayMembers(members);
-        })
-        .catch(error => {
-            displayMembers([]);
-        });
-}
-
-// Load all books
-function loadAllBooks() {
-    fetch('get_all_books.php')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Failed to load books');
-            }
-            return response.json();
-        })
-        .then(books => {
-            allBooks = books;
-            displayBooks(books);
-        })
-        .catch(error => {
-            displayBooks([]);
-        });
-}
-
-// Display members in dropdown
-function displayMembers(members) {
-    const resultsDiv = document.getElementById('memberSearchResults');
-    resultsDiv.innerHTML = '';
-    
-    if (members.length === 0) {
-        resultsDiv.innerHTML = '<div style="padding: 15px; color: #999; text-align: center;">No members found</div>';
-        resultsDiv.style.display = 'block';
-        return;
-    }
-    
-    members.forEach(member => {
-        const classInfo = member.class ? ' (' + member.class + ')' : '';
-        const div = document.createElement('div');
-        div.style.cssText = 'padding: 12px 15px; cursor: pointer; border-bottom: 1px solid #f0f0f0; transition: background 0.2s; font-size: 0.95rem;';
-        div.innerHTML = '<strong style="color: #333;">' + member.name + '</strong><span style="color: #666;">' + classInfo + '</span>';
-        div.onmouseover = () => div.style.background = '#f5f5f5';
-        div.onmouseout = () => div.style.background = '';
-        div.onclick = () => selectMember(member.id, member.name, member.class);
-        resultsDiv.appendChild(div);
-    });
-    
-    resultsDiv.style.display = 'block';
-}
-
-// Display books in dropdown
-function displayBooks(books) {
-    const resultsDiv = document.getElementById('bookSearchResults');
-    resultsDiv.innerHTML = '';
-    
-    if (books.length === 0) {
-        resultsDiv.innerHTML = '<div style="padding: 15px; color: #999; text-align: center;">No available books found</div>';
-        resultsDiv.style.display = 'block';
-        return;
-    }
-    
-    books.forEach(book => {
-        const div = document.createElement('div');
-        div.style.cssText = 'padding: 12px 15px; cursor: pointer; border-bottom: 1px solid #f0f0f0; transition: background 0.2s; font-size: 0.95rem;';
-        div.innerHTML = '<strong style="color: #333;">' + book.title + '</strong><br><span style="color: #666; font-size: 0.9rem;">by ' + book.author + '</span><span style="color: #667eea; font-weight: 600; margin-left: 8px;">(Available: ' + book.available_quantity + ')</span>';
-        div.onmouseover = () => div.style.background = '#f5f5f5';
-        div.onmouseout = () => div.style.background = '';
-        div.onclick = () => selectBook(book.id, book.title, book.author, book.available_quantity);
-        resultsDiv.appendChild(div);
-    });
-    
-    resultsDiv.style.display = 'block';
-}
-
-// Member Search Function - filters locally
-function searchMembers() {
-    const searchTerm = document.getElementById('memberSearch').value.toLowerCase();
-    
-    if (searchTerm.length === 0) {
-        // Show all members if search is empty
-        displayMembers(allMembers);
-        return;
-    }
-    
-    // Filter members by name or class
-    const filtered = allMembers.filter(member => 
-        member.name.toLowerCase().includes(searchTerm) || 
-        (member.class && member.class.toLowerCase().includes(searchTerm))
-    );
-    
-    displayMembers(filtered);
-}
-
-function selectMember(memberId, memberName, memberClass) {
-    document.getElementById('member_id').value = memberId;
-    const classInfo = memberClass ? ' (' + memberClass + ')' : '';
-    document.getElementById('selectedMemberText').textContent = memberName + classInfo;
-    document.getElementById('selectedMember').style.display = 'block';
-    document.getElementById('memberSearch').value = memberName + classInfo;
-    document.getElementById('memberSearchResults').style.display = 'none';
-}
-
-// Book Search Function - filters locally
-function searchBooks() {
-    const searchTerm = document.getElementById('bookSearch').value.toLowerCase();
-    
-    if (searchTerm.length === 0) {
-        // Show all books if search is empty
-        displayBooks(allBooks);
-        return;
-    }
-    
-    // Filter books by title or author
-    const filtered = allBooks.filter(book => 
-        book.title.toLowerCase().includes(searchTerm) || 
-        book.author.toLowerCase().includes(searchTerm)
-    );
-    
-    displayBooks(filtered);
-}
-
-function selectBook(bookId, bookTitle, bookAuthor, availableQty) {
-    document.getElementById('book_id').value = bookId;
-    document.getElementById('selectedBookText').textContent = bookTitle + ' by ' + bookAuthor + ' (Available: ' + availableQty + ')';
-    document.getElementById('selectedBook').style.display = 'block';
-    document.getElementById('bookSearch').value = bookTitle;
-    document.getElementById('bookSearchResults').style.display = 'none';
-}
-
-// Validate form before submission
-function validateBorrowForm() {
-    const memberId = document.getElementById('member_id').value;
-    const bookId = document.getElementById('book_id').value;
-    const borrowDate = document.getElementById('borrow_date').value;
-    const dueDate = document.getElementById('due_date').value;
-    
-    if (!memberId || memberId == 0) {
-        alert('⚠️ Please select or enter a member ID');
-        return false;
-    }
-    
-    if (!bookId || bookId == 0) {
-        alert('⚠️ Please select or enter a book ID');
-        return false;
-    }
-    
-    if (!borrowDate) {
-        alert('⚠️ Please select a borrow date');
-        return false;
-    }
-    
-    if (!dueDate) {
-        alert('⚠️ Please select a due date');
-        return false;
-    }
-    
-    const borrowDateObj = new Date(borrowDate);
-    const dueDateObj = new Date(dueDate);
-    
-    if (dueDateObj <= borrowDateObj) {
-        alert('⚠️ Due date must be after borrow date');
-        return false;
-    }
-    
-    return true;
-}
-
-document.addEventListener('keydown', function(event) {
-    if (event.key === 'Escape') {
-        closeBorrowModal();
-    }
-});
-
-// Validate due date is after borrow date
-document.getElementById('borrow_date')?.addEventListener('change', function() {
-    const borrowDate = new Date(this.value);
-    const dueDate = new Date(document.getElementById('due_date').value);
-    if (dueDate <= borrowDate) {
-        const newDueDate = new Date(borrowDate);
-        newDueDate.setDate(newDueDate.getDate() + 14);
-        document.getElementById('due_date').value = newDueDate.toISOString().split('T')[0];
-    }
-});
-
-document.getElementById('due_date')?.addEventListener('change', function() {
-    const borrowDate = new Date(document.getElementById('borrow_date').value);
-    const dueDate = new Date(this.value);
-    if (dueDate <= borrowDate) {
-        alert('Due date must be after borrow date!');
-        const newDueDate = new Date(borrowDate);
-        newDueDate.setDate(newDueDate.getDate() + 14);
-        this.value = newDueDate.toISOString().split('T')[0];
-    }
-});
-
-function filterBorrowings() {
-    const filterElement = document.getElementById('statusFilter');
-    if (!filterElement) return;
-    
-    const filter = filterElement.value;
-    const rows = document.querySelectorAll('.borrowing-row');
-    let visibleCount = 0;
-    
-    rows.forEach(row => {
-        const status = row.getAttribute('data-status');
-        const isOverdue = row.getAttribute('data-overdue') === '1';
-        
-        let show = false;
-        if (filter === 'all') {
-            show = true;
-        } else if (filter === 'active') {
-            show = status === 'active';
-        } else if (filter === 'returned') {
-            show = status === 'returned';
-        } else if (filter === 'overdue') {
-            show = isOverdue;
-        }
-        
-        row.style.display = show ? '' : 'none';
-        if (show) visibleCount++;
-    });
-    
-    // Show "no results" message if needed
-    if (visibleCount === 0) {
-        const tbody = document.querySelector('.table tbody');
-        if (!tbody) return;
-        const existingMsg = tbody.querySelector('.no-results-msg');
-        if (!existingMsg) {
-            const noResultsRow = document.createElement('tr');
-            noResultsRow.className = 'no-results-msg';
-            noResultsRow.innerHTML = '<td colspan="8" style="text-align:center; padding: 40px 20px; color: #999;"><div style="font-size: 2rem; margin-bottom: 10px; opacity: 0.3;">🔍</div><p style="font-size: 1rem; margin: 0;">No borrowings match the selected filter.</p></td>';
-            tbody.appendChild(noResultsRow);
-        }
+function renderOptions(listId, items, render, onPick, emptyText) {
+    const list = document.getElementById(listId);
+    list.innerHTML = '';
+    if (!items.length) {
+        list.innerHTML = '<div class="combo-empty">' + esc(emptyText) + '</div>';
     } else {
-        const existingMsg = document.querySelector('.no-results-msg');
-        if (existingMsg) existingMsg.remove();
+        items.slice(0, 50).forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'combo-option';
+            div.innerHTML = render(item);
+            div.onmousedown = e => { e.preventDefault(); onPick(item); };
+            list.appendChild(div);
+        });
     }
+    list.style.display = 'block';
 }
 
-// Apply default filter on load
-document.addEventListener('DOMContentLoaded', function() {
-    filterBorrowings();
-    
-    // Close search results when clicking outside
-    document.addEventListener('click', function(e) {
-        if (!e.target.closest('#memberSearch') && !e.target.closest('#memberSearchResults')) {
-            document.getElementById('memberSearchResults').style.display = 'none';
-        }
-        if (!e.target.closest('#bookSearch') && !e.target.closest('#bookSearchResults')) {
-            document.getElementById('bookSearchResults').style.display = 'none';
-        }
-    });
+function searchMembers() {
+    const q = document.getElementById('memberSearch').value.trim().toLowerCase();
+    const items = allMembers.filter(m => !q || m.name.toLowerCase().includes(q) || (m.class || '').toLowerCase().includes(q));
+    renderOptions('memberSearchResults', items,
+        m => '<span class="cell-main">' + esc(m.name) + '</span><span class="cell-sub">' + esc(m.class || '') + '</span>',
+        selectMember, 'No students match.');
+}
+
+function searchBooks() {
+    const q = document.getElementById('bookSearch').value.trim().toLowerCase();
+    const items = allBooks.filter(b => !q || b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q));
+    renderOptions('bookSearchResults', items,
+        b => '<span><span class="cell-main">' + esc(b.title) + '</span><br><span class="cell-sub">' + esc(b.author) + '</span></span>'
+           + '<span class="badge badge-neutral">' + esc(b.available_quantity) + ' free</span>',
+        selectBook, 'No available books match.');
+}
+
+function selectMember(m) {
+    document.getElementById('member_id').value = m.id;
+    document.getElementById('memberSearch').value = m.name;
+    document.getElementById('selectedMemberText').textContent = m.name + (m.class ? ' · ' + m.class : '');
+    document.getElementById('selectedMember').classList.add('show');
+    hideResults();
+}
+
+function selectBook(b) {
+    document.getElementById('book_id').value = b.id;
+    document.getElementById('bookSearch').value = b.title;
+    document.getElementById('selectedBookText').textContent = b.title + ' by ' + b.author;
+    document.getElementById('selectedBook').classList.add('show');
+    hideResults();
+}
+
+function validateBorrowForm() {
+    const err = document.getElementById('formError');
+    let msg = '';
+    if (!document.getElementById('member_id').value) msg = 'Choose a student from the list.';
+    else if (!document.getElementById('book_id').value) msg = 'Choose a book from the list.';
+    else if (new Date(document.getElementById('due_date').value) <= new Date(document.getElementById('borrow_date').value)) msg = 'The due date must be after the borrow date.';
+    err.textContent = msg;
+    err.style.display = msg ? 'block' : 'none';
+    return !msg;
+}
+
+// Keep the due date 14 days after the borrow date when the borrow date changes
+document.getElementById('borrow_date').addEventListener('change', function () {
+    const due = new Date(this.value);
+    due.setDate(due.getDate() + 14);
+    document.getElementById('due_date').value = due.toISOString().split('T')[0];
 });
-</script>
 
-<style>
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    background-color: rgba(0, 0, 0, 0.5);
-    animation: fadeIn 0.3s;
-}
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-.overdue-row {
-    background-color: #fff3cd !important;
-}
-.status-badge {
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
-}
-.status-active {
-    background: linear-gradient(135deg, #e3f2fd 0%, #b3e5fc 100%);
-    color: #0c5460;
-}
-.status-returned {
-    background: linear-gradient(135deg, #d4edda 0%, #b2dfdb 100%);
-    color: #155724;
-}
-.status-overdue {
-    background: linear-gradient(135deg, #f8d7da 0%, #ffe0b2 100%);
-    color: #721c24;
-}
-.btn.btn-small {
-    padding: 6px 12px;
-    font-size: 0.85rem;
-    border-radius: 8px;
-    font-weight: 500;
-    transition: all 0.2s;
-}
-.btn.btn-small.btn-success {
-    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-    color: white;
-    border: none;
-    box-shadow: 0 2px 8px rgba(76,175,80,0.2);
-}
-.btn.btn-small.btn-success:hover {
-    background: linear-gradient(135deg, #388e3c 0%, #43a047 100%);
-    transform: scale(1.05);
-}
-.modal-content {
-    border-radius: 16px;
-    max-width: 550px;
-    padding: 0;
-    overflow: hidden;
-    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.18);
-    margin: 50px auto;
-    background: white;
-}
-.modal-close {
-    position: absolute;
-    top: 20px;
-    right: 25px;
-    color: white;
-    font-size: 2rem;
-    opacity: 0.9;
-    cursor: pointer;
-    transition: opacity 0.2s;
-}
-.modal-close:hover {
-    opacity: 1;
-}
-@keyframes slideIn {
-    from { opacity: 0; transform: translateY(-20px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-</style>
+document.addEventListener('click', e => {
+    if (!e.target.closest('.combobox')) hideResults();
+});
+
+applyFilters();
+</script>
 
 <?php include 'includes/footer.php'; ?>
