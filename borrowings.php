@@ -20,27 +20,54 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
         $book = $stmt->get_result()->fetch_assoc();
         $stmt->close();
 
-        if (!$member_id || !$book) {
+        $stmt = $conn->prepare("SELECT status FROM members WHERE id = ?");
+        $stmt->bind_param("i", $member_id);
+        $stmt->execute();
+        $member = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        $date_ok = fn($d) => ($x = DateTime::createFromFormat('Y-m-d', $d)) && $x->format('Y-m-d') === $d;
+
+        if (!$member || !$book) {
             $_SESSION['error_message'] = 'Choose a student and a book.';
+        } elseif ($member['status'] !== 'active') {
+            $_SESSION['error_message'] = 'This member is inactive. Make them active on the Members page first.';
+        } elseif (!$date_ok($borrow_date) || !$date_ok($due_date)) {
+            $_SESSION['error_message'] = 'Enter real dates for borrowing and due.';
         } elseif ($book['available_quantity'] <= 0) {
             $_SESSION['error_message'] = '"' . $book['title'] . '" has no copies left to lend.';
         } elseif (strtotime($due_date) <= strtotime($borrow_date)) {
             $_SESSION['error_message'] = 'The due date must be after the borrow date.';
         } else {
-            $stmt = $conn->prepare("INSERT INTO borrowings (member_id, book_id, borrow_date, due_date, status) VALUES (?, ?, ?, ?, 'active')");
-            $stmt->bind_param("iiss", $member_id, $book_id, $borrow_date, $due_date);
-            if ($stmt->execute()) {
-                $conn->query("UPDATE books SET available_quantity = available_quantity - 1 WHERE id = $book_id");
-                $_SESSION['success_message'] = 'Issued "' . $book['title'] . '". Due ' . date('M j', strtotime($due_date)) . '.';
-            } else {
-                $_SESSION['error_message'] = 'Could not issue the book: ' . $conn->error;
+            // Take a copy only if one is still free (two librarians may click at the same time),
+            // and record the loan in the same transaction.
+            $conn->begin_transaction();
+            try {
+                $stmt = $conn->prepare("UPDATE books SET available_quantity = available_quantity - 1 WHERE id = ? AND available_quantity > 0");
+                $stmt->bind_param("i", $book_id);
+                $stmt->execute();
+                $took_copy = $stmt->affected_rows === 1;
+                $stmt->close();
+                if (!$took_copy) {
+                    $conn->rollback();
+                    $_SESSION['error_message'] = '"' . $book['title'] . '" has no copies left to lend.';
+                } else {
+                    $stmt = $conn->prepare("INSERT INTO borrowings (member_id, book_id, borrow_date, due_date, status) VALUES (?, ?, ?, ?, 'active')");
+                    $stmt->bind_param("iiss", $member_id, $book_id, $borrow_date, $due_date);
+                    $stmt->execute();
+                    $stmt->close();
+                    $conn->commit();
+                    $_SESSION['success_message'] = 'Issued "' . $book['title'] . '". Due ' . date('M j', strtotime($due_date)) . '.';
+                }
+            } catch (mysqli_sql_exception $e) {
+                $conn->rollback();
+                $_SESSION['error_message'] = 'Could not issue the book: ' . $e->getMessage();
             }
-            $stmt->close();
         }
     } elseif ($action === 'return') {
         $borrowing_id = (int)($_POST['borrowing_id'] ?? 0);
 
         // Only an active loan can be returned (a double click must not add a copy twice)
+        $conn->begin_transaction();
         $stmt = $conn->prepare("UPDATE borrowings SET status = 'returned', return_date = CURDATE() WHERE id = ? AND status = 'active'");
         $stmt->bind_param("i", $borrowing_id);
         $stmt->execute();
@@ -49,9 +76,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
 
         if ($changed === 1) {
             $conn->query("UPDATE books b JOIN borrowings br ON br.book_id = b.id
-                          SET b.available_quantity = b.available_quantity + 1 WHERE br.id = $borrowing_id");
+                          SET b.available_quantity = LEAST(b.quantity, b.available_quantity + 1) WHERE br.id = $borrowing_id");
+            $conn->commit();
             $_SESSION['success_message'] = 'Marked as returned.';
         } else {
+            $conn->rollback();
             $_SESSION['error_message'] = 'This loan was already returned.';
         }
     }
@@ -178,7 +207,7 @@ if ($db_error) {
                 <?php foreach ($rows as $r):
                     $is_overdue = $r['status'] === 'active' && $r['days_overdue'] > 0;
                     $days_left = -(int)$r['days_overdue'];
-                    $search_text = strtolower($r['title'] . ' ' . $r['author'] . ' ' . $r['member_name'] . ' ' . $r['class']);
+                    $search_text = mb_strtolower($r['title'] . ' ' . $r['author'] . ' ' . $r['member_name'] . ' ' . $r['class'], 'UTF-8');
                 ?>
                     <tr class="loan-row <?php echo $is_overdue ? 'is-overdue' : ''; ?>"
                         data-status="<?php echo $r['status']; ?>"

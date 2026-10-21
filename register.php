@@ -33,6 +33,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Validation
     if (empty($full_name) || empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
         $error = 'Please fill in all required fields!';
+    } elseif ($too_long = length_error(['Full name' => [$full_name, 100], 'Class' => [$class, 50], 'Username' => [$username, 50], 'Email' => [$email, 255]])) {
+        $error = $too_long;
     } elseif (strlen($username) < 3 || !preg_match('/^[A-Za-z0-9_.-]+$/', $username)) {
         $error = 'Username must be at least 3 characters: letters, numbers, _ . - only.';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {

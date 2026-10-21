@@ -1,4 +1,8 @@
 <?php
+// Report database errors as exceptions on every PHP version (8.1+ does this by default)
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+include_once __DIR__ . '/includes/input.php';
+
 $servername = "localhost";
 $username = "root";
 $password = "";

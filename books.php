@@ -27,6 +27,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
     
     if (empty($title) || empty($author)) {
         $_SESSION['error_message'] = 'Title and Author are required!';
+    } elseif ($too_long = length_error(['Title' => [$title, 255], 'Author' => [$author, 255], 'ISBN' => [$isbn, 20], 'Category' => [$category, 100], 'Row' => [$shelf_row, 10], 'Cover link' => [$cover_url, 512]])) {
+        $_SESSION['error_message'] = $too_long;
     } else {
         // Handle cover image: uploaded file or URL
         $final_cover_url = null;
@@ -76,36 +78,46 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
             }
         }
 
+        // ISBN must be unique
+        if (!isset($_SESSION['error_message']) && $isbn !== null) {
+            $chk = $conn->prepare("SELECT title FROM books WHERE isbn = ? LIMIT 1");
+            $chk->bind_param("s", $isbn);
+            $chk->execute();
+            $other = $chk->get_result()->fetch_row();
+            $chk->close();
+            if ($other) {
+                $_SESSION['error_message'] = 'ISBN ' . $isbn . ' already belongs to "' . $other[0] . '". Edit that book instead, or check the number.';
+            }
+        }
+        if (!isset($_SESSION['error_message']) && $quantity < 0) {
+            $_SESSION['error_message'] = 'Copies cannot be negative.';
+        }
+
         // Insert into database - only if no errors so far
         if (!isset($_SESSION['error_message'])) {
-            $stmt = $conn->prepare("INSERT INTO books (title, author, isbn, category, quantity, available_quantity, shelf_number, shelf_row, cover_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            if ($stmt) {
-                $stmt->bind_param("ssssiisss", $title, $author, $isbn, $category, $quantity, $quantity, $shelf_number, $shelf_row, $final_cover_url);
-                
-                if ($stmt->execute()) {
-                    $_SESSION['success_message'] = 'Book added successfully!';
-                } else {
-                    $_SESSION['error_message'] = 'Error adding book: ' . $conn->error;
-                }
+            try {
+                $stmt = $conn->prepare("INSERT INTO books (title, author, isbn, category, quantity, available_quantity, shelf_number, shelf_row, cover_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("ssssiiiss", $title, $author, $isbn, $category, $quantity, $quantity, $shelf_number, $shelf_row, $final_cover_url);
+                $stmt->execute();
                 $stmt->close();
-            } else {
-                // Fallback for environments where new columns aren't present yet
-                $stmt = $conn->prepare("INSERT INTO books (title, author, isbn, category, quantity, available_quantity) VALUES (?, ?, ?, ?, ?, ?)");
-                if ($stmt) {
-                    $stmt->bind_param("ssssii", $title, $author, $isbn, $category, $quantity, $quantity);
-                    if ($stmt->execute()) {
-                        $_SESSION['success_message'] = 'Book added successfully!';
-                    } else {
-                        $_SESSION['error_message'] = 'Error adding book: ' . $conn->error;
-                    }
-                    $stmt->close();
-                } else {
-                    $_SESSION['error_message'] = 'Error preparing book insert. Please check DB connection.';
-                }
+                $_SESSION['success_message'] = 'Added "' . $title . '".';
+            } catch (mysqli_sql_exception $e) {
+                $_SESSION['error_message'] = 'Could not add the book: ' . $e->getMessage();
             }
         }
     }
-    
+
+    // The add dialog posts with fetch: answer in JSON so it can stay open on errors
+    if (isset($_POST['ajax'])) {
+        header('Content-Type: application/json');
+        if (isset($_SESSION['error_message'])) {
+            echo json_encode(['success' => false, 'error' => $_SESSION['error_message']]);
+            unset($_SESSION['error_message']);
+        } else {
+            echo json_encode(['success' => true]);
+        }
+        exit();
+    }
     header("Location: books.php");
     exit();
 }
@@ -171,7 +183,7 @@ if ($db_error) {
             <select id="categoryFilter" class="select" onchange="applyBookFilters()">
                 <option value="">All categories</option>
                 <?php foreach ($categories as $c): ?>
-                    <option value="<?php echo htmlspecialchars(strtolower($c)); ?>"><?php echo htmlspecialchars($c); ?></option>
+                    <option value="<?php echo htmlspecialchars(mb_strtolower($c, 'UTF-8')); ?>"><?php echo htmlspecialchars($c); ?></option>
                 <?php endforeach; ?>
             </select>
             <select id="availabilityFilter" class="select" onchange="applyBookFilters()">
@@ -205,14 +217,14 @@ if ($db_error) {
         $avg = round($book['avg_rating'], 1);
         $avail = (int)$book['available_quantity'];
         $qty = (int)$book['quantity'];
-        $search = strtolower($book['title'] . ' ' . $book['author'] . ' ' . $book['isbn'] . ' ' . $book['category']);
+        $search = mb_strtolower($book['title'] . ' ' . $book['author'] . ' ' . $book['isbn'] . ' ' . $book['category'], 'UTF-8');
     ?>
         <article class="book-card" tabindex="0"
                  data-book-id="<?php echo (int)$book['id']; ?>"
-                 data-title="<?php echo htmlspecialchars(strtolower($book['title'])); ?>"
-                 data-author="<?php echo htmlspecialchars(strtolower($book['author'])); ?>"
+                 data-title="<?php echo htmlspecialchars(mb_strtolower($book['title'], 'UTF-8')); ?>"
+                 data-author="<?php echo htmlspecialchars(mb_strtolower($book['author'], 'UTF-8')); ?>"
                  data-search="<?php echo htmlspecialchars($search); ?>"
-                 data-category="<?php echo htmlspecialchars(strtolower($book['category'] ?? '')); ?>"
+                 data-category="<?php echo htmlspecialchars(mb_strtolower($book['category'] ?? '', 'UTF-8')); ?>"
                  data-rating="<?php echo $avg; ?>"
                  data-reviews="<?php echo (int)$book['review_count']; ?>"
                  data-available="<?php echo $avail > 0 ? 'yes' : 'no'; ?>"
@@ -664,7 +676,7 @@ function saveBook(event) {
 
     const request = bookId
         ? fetch('update_book.php', { method: 'POST', body: formData }).then(r => r.json())
-        : fetch('books.php', { method: 'POST', body: formData }).then(r => ({ success: r.ok }));
+        : (formData.append('ajax', '1'), fetch('books.php', { method: 'POST', body: formData }).then(r => r.json()));
 
     request
         .then(data => {

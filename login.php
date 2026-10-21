@@ -15,6 +15,9 @@ $success = '';
 if (isset($_GET['registered'])) {
     $success = 'Account created! You can log in now.';
 }
+if (isset($_GET['expired'])) {
+    $error = 'You were logged out after an hour without activity. Log in again.';
+}
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $username = trim($_POST['username'] ?? '');

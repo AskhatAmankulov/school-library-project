@@ -15,9 +15,12 @@ A PHP + MySQL web app for running a school library: books, students, borrowings,
    ```
 2. Open the XAMPP Control Panel and start **Apache** and **MySQL**.
 3. Open http://localhost/phpmyadmin and create a database named **`library`**.
-4. Select `library`, open the **Import** tab and import these two files, in this order:
+4. Select `library`, open the **Import** tab and import these files, in this order:
    1. `library.sql`: all tables and sample data
    2. `add_users_table.sql`: login accounts
+   3. `fix_data.sql`: repairs copy counts and a few damaged values in the sample data
+
+Already have the database from an earlier version? Import only the files you haven't imported yet. `add_users_table.sql` and `fix_data.sql` are safe to import again.
 5. Open http://localhost/lib/login.php
 
 

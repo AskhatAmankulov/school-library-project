@@ -44,7 +44,11 @@ if (!$db_error && is_staff() && isset($_POST['import_csv'])) {
             if ($res = $conn->query("SHOW COLUMNS FROM members LIKE 'membership_date'")) { $hasMembershipDate = $res->num_rows > 0; }
             if ($res = $conn->query("SHOW COLUMNS FROM members LIKE 'status'")) { $hasStatus = $res->num_rows > 0; }
         }
-        $header = fgetcsv($handle);
+        // Excel saves "CSV UTF-8" with a BOM and, in many locales, ';' instead of ','
+        $firstLine = (string)fgets($handle);
+        $firstLine = preg_replace('/^\xEF\xBB\xBF/', '', $firstLine);
+        $delim = substr_count($firstLine, ';') > substr_count($firstLine, ',') ? ';' : ',';
+        $header = $firstLine === '' ? false : str_getcsv(trim($firstLine), $delim);
         if ($header === false) {
             $_SESSION['error_message'] = 'CSV is empty or unreadable.';
             fclose($handle);
@@ -76,13 +80,17 @@ if (!$db_error && is_staff() && isset($_POST['import_csv'])) {
             $map[$field] = $foundIdx;
         }
         // Process rows
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, 0, $delim)) !== false) {
             if (count($row) === 1 && trim($row[0]) === '') { continue; }
             $first = trim($row[$map['first']] ?? '');
             $last  = trim($row[$map['last']] ?? '');
             $class = trim($row[$map['class']] ?? '');
             $group = trim($row[$map['group']] ?? '');
             if ($first === '' && $last === '' && $class === '' && $group === '') { continue; }
+            if ($too_long = length_error(['First name' => [$first, 100], 'Last name' => [$last, 100], 'Class' => [$class, 50], 'Group' => [$group, 50]])) {
+                $summary['errors'][] = trim($first . ' ' . $last) . ': ' . $too_long;
+                continue;
+            }
 
             // Build name for backward compatibility
             $fullName = trim($first . ' ' . $last);
@@ -100,7 +108,7 @@ if (!$db_error && is_staff() && isset($_POST['import_csv'])) {
                 $stmt->close();
                 $u = $conn->prepare("UPDATE members SET name = ?, first_name = ?, last_name = ?, class = ?, group_name = ? WHERE id = ?");
                 $u->bind_param('sssssi', $fullName, $first, $last, $class, $group, $existingId);
-                if ($u->execute()) { $summary['updated']++; } else { $summary['errors'][] = 'Update failed for ' . $fullName; }
+                try { $u->execute(); $summary['updated']++; } catch (mysqli_sql_exception $e) { $summary['errors'][] = 'Update failed for ' . $fullName; }
                 $u->close();
             } else {
                 $stmt->close();
@@ -121,7 +129,7 @@ if (!$db_error && is_staff() && isset($_POST['import_csv'])) {
                 }
                 if ($m) {
                     $bind($m);
-                    if ($m->execute()) { $summary['inserted']++; } else { $summary['errors'][] = 'Insert failed for ' . $fullName; }
+                    try { $m->execute(); $summary['inserted']++; } catch (mysqli_sql_exception $e) { $summary['errors'][] = 'Insert failed for ' . $fullName; }
                     $m->close();
                 } else {
                     $summary['errors'][] = 'Insert prepare failed for ' . $fullName;
@@ -154,7 +162,7 @@ if (isset($_POST['add_manual_classes']) && is_staff()) {
             $p = trim($p);
             if ($p === '') continue;
             // Basic validation: allow letters, numbers, spaces, hyphen
-            if (!preg_match('/^[A-Za-z0-9 \-]{1,40}$/', $p)) {
+            if (!preg_match('/^[\p{L}\p{N} \-]{1,40}$/u', $p)) {
                 $_SESSION['error_message'] = 'Invalid class name: ' . $p;
                 $clean = []; // Abort
                 break;
@@ -199,12 +207,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_member']) && !$db
     $last = trim($_POST['last_name'] ?? '');
     $class = trim($_POST['class'] ?? '');
     $group = trim($_POST['group_name'] ?? '');
-    $membership_date = $_POST['membership_date'] ?: date('Y-m-d');
+    $membership_date = trim($_POST['membership_date'] ?? '') ?: date('Y-m-d');
+    $date_ok = DateTime::createFromFormat('Y-m-d', $membership_date);
     $status = ($_POST['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
     $name = trim($first . ' ' . $last);
 
+    $too_long = length_error(['First name' => [$first, 100], 'Last name' => [$last, 100], 'Class' => [$class, 50], 'Group' => [$group, 50]]);
     if ($name === '') {
         $_SESSION['error_message'] = 'Enter a first or last name.';
+    } elseif ($too_long) {
+        $_SESSION['error_message'] = $too_long;
+    } elseif (!$date_ok || $date_ok->format('Y-m-d') !== $membership_date) {
+        $_SESSION['error_message'] = 'The "Member since" date is not a valid date.';
     } elseif ($edit_id) {
         $stmt = $conn->prepare("UPDATE members SET name=?, first_name=?, last_name=?, class=?, group_name=?, membership_date=?, status=? WHERE id=?");
         $stmt->bind_param("sssssssi", $name, $first, $last, $class, $group, $membership_date, $status, $edit_id);
@@ -236,6 +250,29 @@ if (isset($_GET['delete']) && !$db_error) {
         exit();
     }
     $member_id = (int)$_GET['delete'];
+
+    // Don't lose track of books: a member who still has books can't be deleted
+    $stmt = $conn->prepare("SELECT m.name, (SELECT COUNT(*) FROM borrowings br WHERE br.member_id = m.id AND br.status = 'active') FROM members m WHERE m.id = ?");
+    $stmt->bind_param("i", $member_id);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_row();
+    $stmt->close();
+    if (!$row) {
+        $_SESSION['error_message'] = 'That member no longer exists.';
+        header("Location: members.php");
+        exit();
+    }
+    if ($row[1] > 0) {
+        $_SESSION['error_message'] = $row[0] . ' still has ' . $row[1] . ' book' . ($row[1] > 1 ? 's' : '') . ' on loan. Mark them returned on the Borrowings page first.';
+        header("Location: members.php");
+        exit();
+    }
+    if ($member_id === (int)$_SESSION['user_id']) {
+        $_SESSION['error_message'] = 'You cannot delete your own account here.';
+        header("Location: members.php");
+        exit();
+    }
+
     $stmt = $conn->prepare("DELETE FROM members WHERE id = ?");
     $stmt->bind_param("i", $member_id);
     if ($stmt->execute()) {
@@ -340,7 +377,7 @@ if ($db_error) {
             </thead>
             <tbody>
                 <?php foreach ($members as $m):
-                    $search = strtolower($m['name'] . ' ' . $m['group_name'] . ' ' . $m['username']);
+                    $search = mb_strtolower($m['name'] . ' ' . $m['group_name'] . ' ' . $m['username'], 'UTF-8');
                 ?>
                     <tr class="member-row" style="cursor: pointer;"
                         onclick="location.href='profile.php?id=<?php echo (int)$m['id']; ?>'"
@@ -382,7 +419,7 @@ if ($db_error) {
                             <button type="button" class="btn btn-outline btn-small" onclick="event.stopPropagation(); editMember(<?php echo (int)$m['id']; ?>)">Edit</button>
                             <?php if (is_admin()): ?>
                                 <a href="members.php?delete=<?php echo (int)$m['id']; ?>" class="btn btn-small btn-ghost-danger" title="Delete"
-                                   onclick="event.stopPropagation(); return confirm('Delete <?php echo htmlspecialchars(addslashes($m['name']), ENT_QUOTES); ?>? Their loans, reviews and login will be removed too.')">Delete</a>
+                                   onclick="event.stopPropagation(); return confirm('Delete <?php echo htmlspecialchars(addslashes($m['name']), ENT_QUOTES); ?>? Their reading history, reviews and login will be removed too.')">Delete</a>
                             <?php endif; ?>
                         </td>
                     </tr>

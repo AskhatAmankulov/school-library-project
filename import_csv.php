@@ -64,8 +64,13 @@ $errors = [];
 if (($handle = fopen($filename, 'r')) !== FALSE) {
     $rowNumber = 0;
     $isHeader = true;
-    
-    while (($data = fgetcsv($handle, 1000, ',')) !== FALSE) {
+
+    // Excel saves "CSV UTF-8" with a BOM and, in many locales, ';' instead of ','
+    $firstLine = preg_replace('/^\xEF\xBB\xBF/', '', (string)fgets($handle));
+    $delim = substr_count($firstLine, ';') > substr_count($firstLine, ',') ? ';' : ',';
+    rewind($handle);
+
+    while (($data = fgetcsv($handle, 0, $delim)) !== FALSE) {
         $rowNumber++;
         
         // Skip header row
@@ -74,8 +79,8 @@ if (($handle = fopen($filename, 'r')) !== FALSE) {
             continue;
         }
         
-        // Skip empty rows
-        if (empty($data[0])) {
+        // Skip rows that are completely empty
+        if (count(array_filter($data, fn($cell) => trim((string)$cell) !== '')) === 0) {
             continue;
         }
         
@@ -103,7 +108,19 @@ if (($handle = fopen($filename, 'r')) !== FALSE) {
             continue;
         }
         
+        $shelf_number = $shelf_number !== null ? (int)$shelf_number : null;
+        if ($too_long = length_error(['Title' => [$title, 255], 'Author' => [$author, 255], 'ISBN' => [$isbn, 20], 'Category' => [$category, 100], 'Row' => [$shelf_row, 10]])) {
+            $skipped++;
+            $errors[] = "Row $rowNumber: $too_long";
+            continue;
+        }
+
         // Validate quantity
+        if (!preg_match('/^\d+$/', trim((string)($data[4] ?? '')))) {
+            $skipped++;
+            $errors[] = "Row $rowNumber: Quantity must be a whole number, 0 or more";
+            continue;
+        }
         if ($quantity < 0) {
             $skipped++;
             $errors[] = "Row $rowNumber: Quantity must be non-negative";
@@ -131,11 +148,12 @@ if (($handle = fopen($filename, 'r')) !== FALSE) {
         $stmt = $conn->prepare("INSERT INTO books (title, author, isbn, category, quantity, available_quantity, shelf_number, shelf_row) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
         if ($stmt) {
             $stmt->bind_param("ssssiiis", $title, $author, $isbn, $category, $quantity, $quantity, $shelf_number, $shelf_row);
-            if ($stmt->execute()) {
+            try {
+                $stmt->execute();
                 $imported++;
-            } else {
+            } catch (mysqli_sql_exception $e) {
                 $skipped++;
-                $errors[] = "Row $rowNumber: Database error - " . $conn->error;
+                $errors[] = "Row $rowNumber: " . $e->getMessage();
             }
             $stmt->close();
         } else {

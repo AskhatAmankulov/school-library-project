@@ -24,3 +24,19 @@ document.addEventListener('keydown', function (e) {
 document.addEventListener('click', function (e) {
     if (e.target.classList && e.target.classList.contains('modal')) { e.target.style.display = 'none'; }
 });
+
+// If the session ran out, background requests answer 401: say so once and go to the login page
+(function () {
+    const originalFetch = window.fetch;
+    let warned = false;
+    window.fetch = function () {
+        return originalFetch.apply(this, arguments).then(function (response) {
+            if (response.status === 401 && !warned) {
+                warned = true;
+                alert('You were logged out. Log in again to continue.');
+                window.location.href = 'login.php?expired=1';
+            }
+            return response;
+        });
+    };
+})();

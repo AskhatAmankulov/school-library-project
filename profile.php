@@ -43,7 +43,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_avatar'])) {
 
     if (($_POST['avatar_source'] ?? 'upload') === 'url') {
         $url = trim($_POST['avatar_url'] ?? '');
-        if (filter_var($url, FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $url)) {
+        if (mb_strlen($url) > 512) {
+            $_SESSION['error_message'] = 'The photo link is too long (512 characters at most).';
+        } elseif (filter_var($url, FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $url)) {
             $new_avatar = $url;
         } else {
             $_SESSION['error_message'] = 'Please enter a valid image link (http/https).';
