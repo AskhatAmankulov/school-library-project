@@ -13,7 +13,7 @@ Problems collected:
 import asyncio, json, re, sys
 from playwright.async_api import async_playwright
 
-from helpers import BASE_URL as B, reset_database
+from helpers import BASE_URL as B, annotate, reset_database
 ROLES = {
     "guest": None,
     "user": ("user", "user123"),
@@ -143,6 +143,7 @@ async def main():
         print(json.dumps(summary, indent=1))
     for pr in problems:
         print("FAIL", json.dumps(pr, ensure_ascii=False))
+        annotate("Click-everything test", json.dumps(pr, ensure_ascii=False))
     print(f"Click-everything test: {len(summary)} page visits, {len(problems)} problems")
     sys.exit(1 if problems else 0)
 

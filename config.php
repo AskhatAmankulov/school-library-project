@@ -37,3 +37,12 @@ if ($db_error) {
         . "<br>Make sure MySQL is running (in XAMPP: open the Control Panel and start MySQL)"
         . " and that the <code>$database</code> database exists.");
 }
+
+// The database exists but nothing was imported yet: say what to do instead of failing later
+if ($conn->query("SHOW TABLES LIKE 'books'")->num_rows === 0) {
+    http_response_code(503);
+    die("The <code>" . htmlspecialchars($database) . "</code> database is empty. Import <code>library.sql</code>,"
+        . " then <code>add_users_table.sql</code> and <code>fix_data.sql</code> (in phpMyAdmin: select the database, Import tab)."
+        . " With Docker this happens automatically on the first start.");
+}
+

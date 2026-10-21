@@ -16,6 +16,7 @@ resetting (Docker is ideal).
 """
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 
@@ -77,6 +78,13 @@ def reset_database():
         conn.close()
 
 
+def annotate(title, message):
+    """On GitHub Actions, show a failure as an annotation on the run page."""
+    if os.environ.get("GITHUB_ACTIONS"):
+        clean = str(message).replace("%", "%25").replace("\r", "").replace("\n", " ")
+        print(f"::error title={title}::{clean}", file=sys.stdout, flush=True)
+
+
 class Results:
     """Collects PASS/FAIL lines and prints a summary."""
 
@@ -96,6 +104,10 @@ class Results:
         for area, name, ok, detail in self.rows:
             if verbose or not ok:
                 print(("PASS " if ok else "FAIL ") + f"[{area}] {name}" + (f"  -> {detail}" if not ok and detail else ""))
+            if not ok:
+                annotate(f"{self.title}: {area}", f"{name} -> {detail}")
+        for err in self.js_errors:
+            annotate(f"{self.title}: JavaScript error", err)
         ok = len(self.rows) - len(self.failed)
         extra = f"; JS errors: {self.js_errors}" if self.js_errors else ""
         print(f"{self.title}: {ok} passed, {len(self.failed)} failed{extra}")

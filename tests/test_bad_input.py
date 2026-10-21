@@ -12,7 +12,7 @@ import sys
 
 from playwright.async_api import async_playwright
 
-from helpers import BASE_URL as B, reset_database
+from helpers import BASE_URL as B, annotate, reset_database
 
 LONG = "Ж" * 300
 PHPERR = re.compile(r"(Fatal error|Warning:|Notice:|Deprecated:|Uncaught|Stack trace)", re.I)
@@ -123,6 +123,7 @@ async def main():
         await br.close()
     for f in fails:
         print("FAIL", f)
+        annotate("Bad-input tests", f)
     print(f"Bad-input tests: {passes} passed, {len(fails)} failed")
     sys.exit(1 if fails else 0)
 
