@@ -72,5 +72,13 @@ if (is_array($manualClasses)) {
 echo json_encode([
     'academicYear' => $academicYear,
     'classes'      => $classes,
-    'manual'       => $manualClasses
+    'manual'       => $manualClasses,
+    // Raw settings, used by the class manager form on members.php
+    'config'       => [
+        'min_grade'      => (int)($config['min_grade'] ?? 1),
+        'max_grade'      => (int)($config['max_grade'] ?? 12),
+        'sections'       => array_values($config['sections'] ?? ['A', 'B']),
+        'start_month'    => (int)($config['start_month'] ?? 9),
+        'year_overrides' => $config['year_overrides'] ?? []
+    ]
 ]);

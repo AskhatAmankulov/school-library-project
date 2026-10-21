@@ -904,33 +904,13 @@ function loadClassConfig() {
     fetch('get_classes.php?t=' + Date.now())
         .then(r => r.json())
         .then(data => {
-            // Fetch config file for full details
-            fetch('includes/class_config.php?t=' + Date.now())
-                .then(r2 => r2.text())
-                .then(txt => {
-                    // Parse PHP array (very basic, not secure for arbitrary PHP)
-                    let min = 1, max = 12, sections = ['A','B'], startMonth = 9, overrides = {};
-                    try {
-                        // Use regex to extract values
-                        min = parseInt(txt.match(/'min_grade'\s*=>\s*(\d+)/)[1]);
-                        max = parseInt(txt.match(/'max_grade'\s*=>\s*(\d+)/)[1]);
-                        let secMatch = txt.match(/'sections'\s*=>\s*\[((?:'[^']+'\s*,?\s*)+)\]/);
-                        if (secMatch) {
-                            sections = secMatch[1].split(',').map(s => s.replace(/'/g,'').trim());
-                        }
-                        let sm = txt.match(/'start_month'\s*=>\s*(\d+)/);
-                        if (sm) startMonth = parseInt(sm[1]);
-                        let yo = txt.match(/'year_overrides'\s*=>\s*\[((.|\n)*?)\]/);
-                        if (yo && yo[1].trim().length > 0) {
-                            try { overrides = JSON.parse(yo[1].replace(/=>/g, ':').replace(/'/g, '"').replace(/,\s*\}/g, '}').replace(/,\s*\]/g, ']')); } catch(e) { overrides = {}; }
-                        }
-                    } catch(e) {}
-                    document.getElementById('minGradeInput').value = min;
-                    document.getElementById('maxGradeInput').value = max;
-                    document.getElementById('sectionsInput').value = sections.join(',');
-                    document.getElementById('startMonthInput').value = startMonth;
-                    document.getElementById('overridesInput').value = Object.keys(overrides).length ? JSON.stringify(overrides) : '';
-                });
+            const cfg = data.config || {};
+            const overrides = cfg.year_overrides || {};
+            document.getElementById('minGradeInput').value = cfg.min_grade ?? 1;
+            document.getElementById('maxGradeInput').value = cfg.max_grade ?? 12;
+            document.getElementById('sectionsInput').value = (cfg.sections || ['A', 'B']).join(',');
+            document.getElementById('startMonthInput').value = cfg.start_month ?? 9;
+            document.getElementById('overridesInput').value = Object.keys(overrides).length ? JSON.stringify(overrides) : '';
         });
 }
 

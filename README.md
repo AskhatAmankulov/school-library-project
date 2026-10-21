@@ -20,7 +20,6 @@ A PHP + MySQL web app for running a school library: books, students, borrowings,
    2. `add_users_table.sql`: login accounts
 5. Open http://localhost/lib/login.php
 
-The other `add_*.sql` files and `setup.sql` are old migration steps. They are already included in `library.sql`, so don't run them.
 
 ## Accounts
 
@@ -83,6 +82,28 @@ Students can create their own account at `register.php`. Every account is stored
 - Self-registration for students (creates the member and the account)
 - Change password, upload a profile photo
 - Borrowing history and reviews on the profile page
+
+## Project structure
+
+```
+lib/
+├── login.php, register.php, logout.php   Accounts
+├── index.php                             Dashboard (staff view / student view)
+├── books.php                             Book catalogue, add/edit, CSV import
+├── members.php                           Students (staff only)
+├── borrowings.php                        Issue and return books (staff only)
+├── profile.php                           Profile, history, reviews, password, photo
+├── get_*.php, update_*.php, delete_*.php,
+│   search_*.php, submit_review.php,
+│   import_csv.php                        AJAX endpoints used by the pages
+├── auth_check.php                        Login check + role helpers
+├── config.php                            Database connection
+├── includes/                             Header, footer, shared functions, class settings
+├── css/, js/                             Styles and scripts
+├── uploads/                              Book covers and profile photos
+├── library.sql, add_users_table.sql      Database to import
+└── .htaccess                             Blocks web access to .sql/.md and includes/
+```
 
 ## Troubleshooting
 

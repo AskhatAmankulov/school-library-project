@@ -1,0 +1,6 @@
+# Block direct web access to database dumps, docs and other non-page files.
+# They stay on disk (you can still import library.sql in phpMyAdmin),
+# but http://localhost/lib/library.sql returns "Forbidden".
+<FilesMatch "\.(sql|md|bat|csv|txt|patch|backup|log)$">
+    Require all denied
+</FilesMatch>
