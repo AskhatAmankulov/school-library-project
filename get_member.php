@@ -1,4 +1,7 @@
 <?php
+session_start();
+include 'auth_check.php';
+require_staff(true);
 include 'config.php';
 header('Content-Type: application/json');
 

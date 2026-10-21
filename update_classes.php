@@ -2,11 +2,8 @@
 // API to update class configuration (add/edit/remove classes)
 // Only allow POST requests and require authentication (reuse session)
 session_start();
-if (!isset($_SESSION['user_id'])) {
-    http_response_code(403);
-    echo json_encode(['error' => 'Unauthorized']);
-    exit();
-}
+include 'auth_check.php';
+require_staff(true);
 
 $configPath = __DIR__ . '/includes/class_config.php';
 if (!file_exists($configPath)) {

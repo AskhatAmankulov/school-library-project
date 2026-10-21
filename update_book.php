@@ -1,6 +1,7 @@
 <?php
 session_start();
 include 'auth_check.php';
+require_staff(true);
 include 'config.php';
 
 header('Content-Type: application/json');
@@ -19,6 +20,7 @@ $book_id = (int)$_POST['book_id'];
 $title = trim($_POST['title'] ?? '');
 $author = trim($_POST['author'] ?? '');
 $isbn = trim($_POST['isbn'] ?? '');
+if ($isbn === '') { $isbn = null; }
 $category = trim($_POST['category'] ?? '');
 $quantity = (int)($_POST['quantity'] ?? 0);
 $shelf_number = isset($_POST['shelf_number']) && $_POST['shelf_number'] !== '' ? (int)$_POST['shelf_number'] : null;
@@ -71,7 +73,7 @@ $sql = "UPDATE books SET title=?, author=?, isbn=?, category=?, quantity=?, shel
 $stmt = $conn->prepare($sql);
 
 if ($stmt) {
-    $stmt->bind_param("ssssiiiss", $title, $author, $isbn, $category, $quantity, $shelf_number, $shelf_row, $final_cover_url, $book_id);
+    $stmt->bind_param("ssssiissi", $title, $author, $isbn, $category, $quantity, $shelf_number, $shelf_row, $final_cover_url, $book_id);
 } else {
     // Fallback for environments without new columns
     $sql = "UPDATE books SET title=?, author=?, isbn=?, category=?, quantity=? WHERE id=?";

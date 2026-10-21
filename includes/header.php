@@ -20,7 +20,7 @@ $bodyClass = (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') ? 'admi
             <ul class="nav-links">
                 <li><a href="index.php">Dashboard</a></li>
                 <li><a href="books.php">Books</a></li>
-                <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
+                <?php if (isset($_SESSION['role']) && in_array($_SESSION['role'], ['admin', 'librarian'], true)): ?>
                     <li><a href="members.php">Members</a></li>
                     <li><a href="borrowings.php">Borrowings</a></li>
                 <?php endif; ?>
@@ -31,8 +31,8 @@ $bodyClass = (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') ? 'admi
                     $user_id = $_SESSION['user_id'] ?? null;
                     $user_role = $_SESSION['role'] ?? 'user';
                     echo '<span class="user-info">👤 ' . htmlspecialchars($_SESSION['username']) . ' (' . htmlspecialchars($user_role) . ')</span>';
-                    // Only show profile link for non-admin users
-                    if ($user_id && $user_role !== 'admin') {
+                    // Every account has a member profile now
+                    if ($user_id) {
                         echo ' <a href="profile.php?id=' . $user_id . '" class="btn-profile" style="background: #6c5ce7; color: white; padding: 8px 15px; border-radius: 4px; text-decoration: none; margin-right: 10px;">My Profile</a>';
                     }
                     echo ' <a href="logout.php" class="btn-logout">Logout</a>';

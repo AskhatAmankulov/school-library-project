@@ -3,12 +3,8 @@ session_start();
 include 'auth_check.php';
 include 'config.php';
 
-// Only admin can import books
-if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
-    http_response_code(403);
-    echo json_encode(['error' => 'Unauthorized access']);
-    exit();
-}
+// Only admin/librarian can access this
+require_staff(true);
 
 // Verify database connection
 if ($db_error || !$conn) {
@@ -94,6 +90,7 @@ if (($handle = fopen($filename, 'r')) !== FALSE) {
         $title = trim($data[0] ?? '');
         $author = trim($data[1] ?? '');
         $isbn = trim($data[2] ?? '');
+        if ($isbn === '') { $isbn = null; }
         $category = trim($data[3] ?? '');
         $quantity = isset($data[4]) ? (int)trim($data[4]) : 0;
         $shelf_number = isset($data[5]) && trim($data[5]) !== '' ? trim($data[5]) : null;

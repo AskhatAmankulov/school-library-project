@@ -31,6 +31,20 @@ The other `add_*.sql` files and `setup.sql` are old migration steps. They are al
 | user | user123 | Student |
 | askhat, emma, liam, sophia, noah | 123 | Student |
 
+### What each role can do
+
+| Action | Student | Librarian | Admin |
+|---|:-:|:-:|:-:|
+| Browse books, write reviews | ✅ | ✅ | ✅ |
+| Own profile and history | ✅ | ✅ | ✅ |
+| Add and edit books | ❌ | ✅ | ✅ |
+| Issue and return books | ❌ | ✅ | ✅ |
+| See students and their profiles | ❌ | ✅ | ✅ |
+| Add and edit students, CSV import | ❌ | ✅ | ✅ |
+| Delete books and students | ❌ | ❌ | ✅ |
+
+The checks live in `auth_check.php` (`is_staff()`, `is_admin()`, `require_staff()`, `require_admin()`).
+
 Students can create their own account at `register.php`. Every account is stored in the `users` table and linked to a row in `members`.
 
 ## Features

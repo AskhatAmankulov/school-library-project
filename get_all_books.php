@@ -3,12 +3,8 @@ session_start();
 include 'auth_check.php';
 include 'config.php';
 
-// Only admins can access this
-if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
-    http_response_code(403);
-    echo json_encode(['error' => 'Unauthorized - Admin role required']);
-    exit();
-}
+// Only admin/librarian can access this
+require_staff(true);
 
 if ($db_error || !$conn) {
     http_response_code(500);

@@ -1,12 +1,13 @@
 <?php
 session_start();
 include 'auth_check.php';
+require_staff();
 include 'config.php';
 include 'includes/header.php';
 include 'includes/functions.php';
 
 // Ensure extra columns for admin features (first_name, last_name, group_name)
-if (!$db_error && isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
+if (!$db_error && is_staff()) {
     if ($conn) {
         $needFirst = true; $needLast = true; $needGroup = true;
         if ($res = $conn->query("SHOW COLUMNS FROM members LIKE 'first_name'")) { if ($res->num_rows) $needFirst = false; }
@@ -19,7 +20,7 @@ if (!$db_error && isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
 }
 
 // Admin-only: handle CSV import for students
-if (!$db_error && isset($_SESSION['role']) && $_SESSION['role'] === 'admin' && isset($_POST['import_csv'])) {
+if (!$db_error && is_staff() && isset($_POST['import_csv'])) {
     $summary = [
         'inserted' => 0,
         'updated' => 0,
@@ -145,7 +146,7 @@ if (!$db_error && isset($_SESSION['role']) && $_SESSION['role'] === 'admin' && i
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
-    $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
+    $isAdmin = is_staff();
     $membership_date = $_POST['membership_date'] ?? date('Y-m-d');
     $status = 'active'; // Default to active
     $edit_id = isset($_POST['edit_member_id']) ? (int)$_POST['edit_member_id'] : 0;
@@ -208,6 +209,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
 
 // Handle delete
 if (isset($_GET['delete']) && !$db_error) {
+    if (!is_admin()) {
+        $_SESSION['error_message'] = 'Only the admin can delete members.';
+        header("Location: members.php");
+        exit();
+    }
     $member_id = (int)$_GET['delete'];
     $stmt = $conn->prepare("DELETE FROM members WHERE id = ?");
     $stmt->bind_param("i", $member_id);
@@ -226,7 +232,7 @@ if (isset($_GET['delete']) && !$db_error) {
 
 <?php
 // Admin-only: quick add manual classes (free text like "toddlers, 7H, 8E")
-if (isset($_POST['add_manual_classes']) && isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
+if (isset($_POST['add_manual_classes']) && is_staff()) {
     $raw = trim($_POST['manual_classes'] ?? '');
     if ($raw === '') {
         $_SESSION['error_message'] = 'Please type at least one class name.';
@@ -301,7 +307,7 @@ if ($db_error) {
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
         <h2 style="margin: 0; color: #333; font-size: 1.5rem; display: flex; align-items: center; gap: 10px;"><span style="color: #667eea; font-size: 1.3rem;">📋</span> Members List</h2>
         <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-            <?php if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin'): ?>
+            <?php if (!is_staff()): ?>
             <label for="statusFilter" style="font-weight: 600; color: #555; display: flex; align-items: center; gap: 8px;"><span style="font-size: 0.9rem;">🔍</span> Filter:</label>
             <select id="statusFilter" onchange="filterMembers()" style="padding: 10px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; background: white; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='#667eea'" onmouseout="this.style.borderColor='#e0e0e0'">
                 <option value="all">All Members</option>
@@ -311,13 +317,13 @@ if ($db_error) {
             <?php endif; ?>
             <button onclick="openMemberModal()" class="btn btn-success" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(76,175,80,0.3); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(76,175,80,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(76,175,80,0.3)'">➕ Add New Member</button>
             <button onclick="openClassManagerModal()" class="btn btn-info" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; background: linear-gradient(135deg, #42a5f5 0%, #7e57c2 100%); color: white; font-weight: 600; box-shadow: 0 2px 8px rgba(33,150,243,0.18); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(33,150,243,0.25)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(33,150,243,0.18)'">🏷️ Manage Classes</button>
-            <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
+            <?php if (is_staff()): ?>
             <button onclick="openImportModal()" class="btn btn-warning" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; background: linear-gradient(135deg,#ffb74d 0%, #ff7043 100%); color: white; font-weight: 600; box-shadow: 0 2px 8px rgba(255,167,38,0.25);">📥 Import CSV</button>
             <a href="download_members_template.php" class="btn btn-secondary" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; background: linear-gradient(135deg, #78909c 0%, #546e7a 100%); color: white; font-weight: 600; box-shadow: 0 2px 8px rgba(96,125,139,0.25); text-decoration: none; display: inline-block;">📄 Download CSV Template</a>
             <?php endif; ?>
         </div>
     </div>
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
+    <?php if (is_staff()): ?>
     <div style="margin-top:25px; background: linear-gradient(135deg,#f5f7fa 0%, #e8ecf5 100%); padding:18px 20px; border-radius:12px; border:1px solid #d0d7e2;">
         <h3 style="margin:0 0 12px 0; font-size:1.15rem; display:flex; align-items:center; gap:8px; color:#334e68;">✍️ Quick Add Manual Classes</h3>
         <p style="margin:0 0 12px 0; color:#5d6d7e; font-size:0.9rem;">Type custom class names (examples: <code>toddlers</code>, <code>7H</code>, <code>8E</code>) separated by commas or new lines. These will appear in the class dropdown immediately.</p>
@@ -393,7 +399,7 @@ if ($db_error) {
             <span class="modal-close" onclick="closeMemberModal()" style="position: absolute; top: 20px; right: 25px; color: white; font-size: 2rem; opacity: 0.9; cursor: pointer;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">&times;</span>
         </div>
         <form method="POST" action="" id="memberForm" style="padding: 30px;">
-            <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
+            <?php if (is_staff()): ?>
             <div class="form-group" style="margin-bottom: 20px; display: flex; gap: 16px;">
                 <div style="flex:1;">
                     <label for="first_name" style="font-weight: 600; color: #333; margin-bottom: 8px; display: block;">First Name *</label>
@@ -457,7 +463,7 @@ if ($db_error) {
 
 <table class="table" style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08);">
     <thead>
-        <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
+        <?php if (is_staff()): ?>
             <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
                 <th style="color: white; padding: 15px; text-align: left; font-weight: 600; border-radius: 12px 0 0 0;">First Name</th>
                 <th style="color: white; padding: 15px; text-align: left; font-weight: 600;">Last Name</th>
@@ -477,7 +483,7 @@ if ($db_error) {
     <tbody>
         <?php
         if (!$db_error && $conn) {
-            if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
+            if (is_staff()) {
                 $result = $conn->query("SELECT * FROM members ORDER BY COALESCE(NULLIF(last_name,''), name) ASC, COALESCE(NULLIF(first_name,''), name) ASC");
             } else {
                 $result = $conn->query("SELECT * FROM members ORDER BY name ASC");
@@ -485,7 +491,7 @@ if ($db_error) {
             
             if ($result && $result->num_rows > 0) {
                 while ($member = $result->fetch_assoc()) {
-                    if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
+                    if (is_staff()) {
                         $first = isset($member['first_name']) && $member['first_name'] ? $member['first_name'] : '';
                         $last  = isset($member['last_name']) && $member['last_name'] ? $member['last_name'] : '';
                         if ($first === '' && $member['name']) {
@@ -502,7 +508,7 @@ if ($db_error) {
                         echo "<td style='padding: 15px; color: #666;'>" . htmlspecialchars($group) . "</td>";
                         echo "<td style='padding: 15px;'>
                             <button onclick='event.stopPropagation(); editMember(" . $member['id'] . ")' class='btn btn-small btn-warning' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; margin-right: 6px; transition: all 0.2s;'>✏️ Edit</button>
-                            <a href='members.php?delete=" . $member['id'] . "' class='btn btn-small btn-danger' onclick='event.stopPropagation(); return confirm(\"Are you sure you want to delete this member?\")' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; text-decoration: none; display: inline-block;'>🗑️</a>
+                            " . (is_admin() ? "<a href='members.php?delete=" . $member['id'] . "' class='btn btn-small btn-danger' onclick='event.stopPropagation(); return confirm(\"Are you sure you want to delete this member?\")' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; text-decoration: none; display: inline-block;'>🗑️</a>" : "") . "
                         </td>";
                         echo "</tr>";
                     } else {
@@ -522,13 +528,13 @@ if ($db_error) {
                         </td>";
                         echo "<td style='padding: 15px;'>
                             <button onclick='event.stopPropagation(); editMember(" . $member['id'] . ")' class='btn btn-small btn-warning' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; margin-right: 6px; transition: all 0.2s;'>✏️ Edit</button>
-                            <a href='members.php?delete=" . $member['id'] . "' class='btn btn-small btn-danger' onclick='event.stopPropagation(); return confirm(\"Are you sure you want to delete this member?\")' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; text-decoration: none; display: inline-block;'>🗑️</a>
+                            " . (is_admin() ? "<a href='members.php?delete=" . $member['id'] . "' class='btn btn-small btn-danger' onclick='event.stopPropagation(); return confirm(\"Are you sure you want to delete this member?\")' style='padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; font-weight: 500; text-decoration: none; display: inline-block;'>🗑️</a>" : "") . "
                         </td>";
                         echo "</tr>";
                     }
                 }
             } else {
-                $colspan = (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') ? 5 : 4;
+                $colspan = (is_staff()) ? 5 : 4;
                 echo "<tr><td colspan='".$colspan."' style='text-align:center; padding: 60px 20px; color: #999;'><div style='font-size: 3rem; margin-bottom: 15px; opacity: 0.3;'>👥</div><p style='font-size: 1.1rem; margin: 0;'>No members found. Click 'Add New Member' to add one!</p></td></tr>";
             }
         } else {
@@ -538,7 +544,7 @@ if ($db_error) {
     </tbody>
 </table>
 
-<?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
+<?php if (is_staff()): ?>
 <!-- Import CSV Modal (admin only) -->
 <div id="importModal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 9999;">
     <div style="background: white; width: min(580px, 92vw); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); overflow: hidden;">
@@ -785,7 +791,7 @@ function editMember(memberId) {
             if (data && !data.error) {
                 document.getElementById('memberModal').style.display = 'block';
                 document.querySelector('#memberModal h2').textContent = '✏️ Edit Member';
-                if (typeof isAdmin !== 'undefined' ? isAdmin : (window.isAdmin || false) || (typeof window !== 'undefined' && window.sessionStorage && sessionStorage.getItem('role') === 'admin') || (<?php echo isset($_SESSION['role']) && $_SESSION['role'] === 'admin' ? 'true' : 'false'; ?>)) {
+                if (typeof isAdmin !== 'undefined' ? isAdmin : (window.isAdmin || false) || (typeof window !== 'undefined' && window.sessionStorage && sessionStorage.getItem('role') === 'admin') || (<?php echo is_staff() ? 'true' : 'false'; ?>)) {
                     if (document.getElementById('first_name')) document.getElementById('first_name').value = data.first_name || '';
                     if (document.getElementById('last_name')) document.getElementById('last_name').value = data.last_name || '';
                     if (document.getElementById('group_name')) document.getElementById('group_name').value = data.group_name || '';

@@ -1,11 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in and is an admin
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header("Location: login.php");
-    exit();
-}
+include 'auth_check.php';
+require_staff();
 
 // Set headers for CSV download
 header('Content-Type: text/csv; charset=utf-8');

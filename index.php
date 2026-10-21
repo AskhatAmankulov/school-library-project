@@ -33,7 +33,7 @@ if (!$db_error && $conn) {
     if ($result) $overdue_count = $result->fetch_assoc()['count'];
     
     // Get student personal statistics if user is not admin
-    if (isset($_SESSION['user_id']) && $_SESSION['role'] !== 'admin') {
+    if (isset($_SESSION['user_id']) && !is_staff()) {
         $user_id = (int)$_SESSION['user_id'];
         
         // Get student avatar
@@ -107,7 +107,7 @@ if (!$db_error && $conn) {
     <?php unset($_SESSION['error_message']); ?>
 <?php endif; ?>
 
-<?php if (isset($_SESSION['role']) && $_SESSION['role'] !== 'admin'): ?>
+<?php if (!is_staff()): ?>
 <!-- Student Personal Report -->
 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 16px; padding: 30px; margin-bottom: 30px; color: white; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);">
     <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
@@ -226,7 +226,7 @@ if (!$db_error && $conn) {
     </div>
 </div>
 
-<?php if ($_SESSION['role'] === 'admin'): ?>
+<?php if (is_staff()): ?>
     <?php
     // Fetch detailed overdue books information
     $overdue_query = "SELECT b.title, b.isbn, m.name as member_name, m.class, 
@@ -339,7 +339,7 @@ if (!$db_error && $conn) {
 <?php endif; ?>
 
 <!-- Avatar Upload Modal (Students Only) -->
-<?php if (isset($_SESSION['role']) && $_SESSION['role'] !== 'admin'): ?>
+<?php if (!is_staff()): ?>
 <div id="avatarModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); backdrop-filter: blur(5px);">
     <div style="background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%); margin: 5% auto; padding: 0; border-radius: 20px; width: 90%; max-width: 500px; box-shadow: 0 15px 50px rgba(0,0,0,0.3); animation: slideDown 0.3s ease;">
         <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px; border-radius: 20px 20px 0 0; position: relative;">

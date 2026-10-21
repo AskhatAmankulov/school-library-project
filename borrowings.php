@@ -1,6 +1,7 @@
 <?php
 session_start();
 include 'auth_check.php';
+require_staff();
 include 'config.php';
 include 'includes/header.php';
 

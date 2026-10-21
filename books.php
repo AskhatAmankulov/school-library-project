@@ -5,10 +5,18 @@ include 'config.php';
 include 'includes/functions.php';
 
 // Handle form submission BEFORE any HTML output
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error && !is_staff()) {
+    $_SESSION['error_message'] = 'Only the librarian or admin can add or edit books.';
+    header("Location: books.php");
+    exit();
+}
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && !$db_error) {
+    // Clear a leftover message from an earlier action, otherwise the insert below is skipped
+    unset($_SESSION['error_message']);
     $title = trim($_POST['title'] ?? '');
     $author = trim($_POST['author'] ?? '');
     $isbn = trim($_POST['isbn'] ?? '');
+    if ($isbn === '') { $isbn = null; }
     $category = trim($_POST['category'] ?? '');
     $quantity = (int)($_POST['quantity'] ?? 0);
     $shelf_number = isset($_POST['shelf_number']) && $_POST['shelf_number'] !== '' ? (int)trim($_POST['shelf_number']) : null;
@@ -148,7 +156,7 @@ if ($db_error) {
                 <button id="viewGridBtn" onclick="switchView('grid')" style="padding: 8px 12px; border: none; background: #667eea; color: white; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.2s; font-size: 0.9rem;" title="Grid View">⊞ Grid</button>
                 <button id="viewListBtn" onclick="switchView('list')" style="padding: 8px 12px; border: none; background: transparent; color: #667eea; cursor: pointer; font-weight: 600; transition: all 0.2s; font-size: 0.9rem;" title="List View">≡ List</button>
             </div>
-            <?php if (isset($_SESSION['role']) && $_SESSION['role'] !== 'user'): ?>
+            <?php if (is_staff()): ?>
             <button class="btn btn-success" onclick="openBookModal()" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(76,175,80,0.3); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(76,175,80,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(76,175,80,0.3)'">➕ Add New Book</button>
             <button class="btn btn-info" onclick="openCSVImportModal()" style="padding: 10px 20px; font-size: 1rem; border-radius: 8px; background: #2196F3; color: white; box-shadow: 0 2px 8px rgba(33,150,243,0.3); transition: all 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(33,150,243,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(33,150,243,0.3)'">📥 Import CSV</button>
             <?php endif; ?>
@@ -450,13 +458,15 @@ if ($db_error) {
                 echo "<div style='margin-top: auto;'>";
                 echo "<div style='display: flex; gap: 6px; margin-bottom: 6px;'>";
                 echo "<button onclick='event.stopPropagation(); viewBookInfo(" . $book['id'] . ")' class='btn btn-small btn-success' style='flex: 1; font-size: 0.8rem; padding: 8px 10px; border-radius: 8px; font-weight: 500; transition: all 0.2s; white-space: nowrap;' onmouseover='this.style.transform=\"scale(1.05)\"' onmouseout='this.style.transform=\"scale(1)\"'>ℹ️ Info</button>";
-                if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
+                if (is_staff()) {
                     echo "<button onclick='event.stopPropagation(); editBook(" . $book['id'] . ")' class='btn btn-small btn-primary' style='flex: 1; font-size: 0.8rem; padding: 8px 10px; border-radius: 8px; font-weight: 500; transition: all 0.2s;' onmouseover='this.style.transform=\"scale(1.05)\"' onmouseout='this.style.transform=\"scale(1)\"'>✏️ Edit</button>";
                 }
                 echo "</div>";
                 echo "<div style='display: flex; gap: 6px;'>";
                 echo "<button onclick='event.stopPropagation(); viewReviews(" . $book['id'] . ", \"" . htmlspecialchars($book['title'], ENT_QUOTES) . "\")' class='btn btn-small btn-warning' style='flex: 1; font-size: 0.8rem; padding: 8px 10px; border-radius: 8px; font-weight: 500; transition: all 0.2s; white-space: nowrap;' onmouseover='this.style.transform=\"scale(1.05)\"' onmouseout='this.style.transform=\"scale(1)\"'>⭐ Reviews</button>";
-                echo "<button onclick='event.stopPropagation(); viewBorrowers(" . $book['id'] . ", \"" . htmlspecialchars($book['title'], ENT_QUOTES) . "\", " . $book['available_quantity'] . ")' class='btn btn-small btn-info' style='flex: 1; font-size: 0.8rem; padding: 8px 10px; border-radius: 8px; font-weight: 500; transition: all 0.2s; white-space: nowrap;' onmouseover='this.style.transform=\"scale(1.05)\"' onmouseout='this.style.transform=\"scale(1)\"'>👥 Borrowers</button>";
+                if (is_staff()) {
+                    echo "<button onclick='event.stopPropagation(); viewBorrowers(" . $book['id'] . ", \"" . htmlspecialchars($book['title'], ENT_QUOTES) . "\", " . $book['available_quantity'] . ")' class='btn btn-small btn-info' style='flex: 1; font-size: 0.8rem; padding: 8px 10px; border-radius: 8px; font-weight: 500; transition: all 0.2s; white-space: nowrap;' onmouseover='this.style.transform=\"scale(1.05)\"' onmouseout='this.style.transform=\"scale(1)\"'>👥 Borrowers</button>";
+                }
                 echo "</div>";
                 echo "</div>";
                 echo "</div>";
@@ -480,7 +490,8 @@ if ($db_error) {
 
 <script>
 // Check if current user is admin
-const isAdmin = <?php echo isset($_SESSION['role']) && $_SESSION['role'] === 'admin' ? 'true' : 'false'; ?>;
+const isAdmin = <?php echo is_admin() ? 'true' : 'false'; ?>;
+const isStaff = <?php echo is_staff() ? 'true' : 'false'; ?>;
 let booksOriginalGridHTML = '';
 let booksCurrentView = 'grid';
 
@@ -625,11 +636,13 @@ function switchView(view) {
             
             html += '<div style="flex-shrink: 0; padding: 20px; display: flex; flex-direction: column; gap: 10px; justify-content: center; background: linear-gradient(135deg, #f8f9fc 0%, #f0f3f7 100%); border-left: 1px solid #e9ecef;">';
             html += '<button onclick="viewBookInfo(' + bookId + ')" class="btn btn-small" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; font-weight: 600; background: linear-gradient(135deg, #27ae60 0%, #229954 100%); color: white; border: none; box-shadow: 0 2px 6px rgba(39,174,96,0.3); transition: all 0.2s; white-space: nowrap;" onmouseover="this.style.transform=\'scale(1.05)\'; this.style.boxShadow=\'0 4px 12px rgba(39,174,96,0.4)\'" onmouseout="this.style.transform=\'scale(1)\'; this.style.boxShadow=\'0 2px 6px rgba(39,174,96,0.3)\'">ℹ️ Details</button>';
-            if (isAdmin) {
+            if (isStaff) {
                 html += '<button onclick="editBook(' + bookId + ')" class="btn btn-small" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; font-weight: 600; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; box-shadow: 0 2px 6px rgba(102,126,234,0.3); transition: all 0.2s; white-space: nowrap;" onmouseover="this.style.transform=\'scale(1.05)\'; this.style.boxShadow=\'0 4px 12px rgba(102,126,234,0.4)\'" onmouseout="this.style.transform=\'scale(1)\'; this.style.boxShadow=\'0 2px 6px rgba(102,126,234,0.3)\'">✏️ Edit</button>';
             }
             html += '<button onclick="viewReviews(' + bookId + ', \'' + title.replace(/'/g, "\\'") + '\')" class="btn btn-small" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; font-weight: 600; background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); color: white; border: none; box-shadow: 0 2px 6px rgba(243,156,18,0.3); transition: all 0.2s; white-space: nowrap;" onmouseover="this.style.transform=\'scale(1.05)\'; this.style.boxShadow=\'0 4px 12px rgba(243,156,18,0.4)\'" onmouseout="this.style.transform=\'scale(1)\'; this.style.boxShadow=\'0 2px 6px rgba(243,156,18,0.3)\'">⭐ Reviews</button>';
-            html += '<button onclick="viewBorrowers(' + bookId + ', \'' + title.replace(/'/g, "\\'") + '\', ' + availableQty + ')" class="btn btn-small" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; font-weight: 600; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; border: none; box-shadow: 0 2px 6px rgba(52,152,219,0.3); transition: all 0.2s; white-space: nowrap;" onmouseover="this.style.transform=\'scale(1.05)\'; this.style.boxShadow=\'0 4px 12px rgba(52,152,219,0.4)\'" onmouseout="this.style.transform=\'scale(1)\'; this.style.boxShadow=\'0 2px 6px rgba(52,152,219,0.3)\'">👥 Borrowers</button>';
+            if (isStaff) {
+                html += '<button onclick="viewBorrowers(' + bookId + ', \'' + title.replace(/'/g, "\\'") + '\', ' + availableQty + ')" class="btn btn-small" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; font-weight: 600; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; border: none; box-shadow: 0 2px 6px rgba(52,152,219,0.3); transition: all 0.2s; white-space: nowrap;" onmouseover="this.style.transform=\'scale(1.05)\'; this.style.boxShadow=\'0 4px 12px rgba(52,152,219,0.4)\'" onmouseout="this.style.transform=\'scale(1)\'; this.style.boxShadow=\'0 2px 6px rgba(52,152,219,0.3)\'">👥 Borrowers</button>';
+            }
             html += '</div>';
 
             listItem.innerHTML = html;
@@ -740,7 +753,7 @@ function openBookModal() {
 function editBook(bookId) {
     document.getElementById('bookModalTitle').textContent = '✏️ Edit Book';
     document.getElementById('bookModal').style.display = 'block';
-    document.getElementById('deleteBookBtn').style.display = 'block';
+    document.getElementById('deleteBookBtn').style.display = isAdmin ? 'block' : 'none';
     
     fetch('get_book.php?book_id=' + bookId)
         .then(response => response.json())

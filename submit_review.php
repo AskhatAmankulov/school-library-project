@@ -17,7 +17,9 @@ if (!isset($_POST['book_id']) || !isset($_POST['rating'])) {
 
 $book_id = (int)$_POST['book_id'];
 $rating = (int)$_POST['rating'];
-$member_id = isset($_POST['member_id']) ? (int)$_POST['member_id'] : null;
+// Only staff can post a review on behalf of a chosen member;
+// a student's review is always saved under their own account.
+$member_id = (is_staff() && !empty($_POST['member_id'])) ? (int)$_POST['member_id'] : null;
 $comment = trim($_POST['comment'] ?? '');
 
 // Verify book exists
