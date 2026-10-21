@@ -115,7 +115,7 @@ endforeach;
         <div class="page-header-person">
             <span class="avatar avatar-lg">
                 <?php if (!empty($student_avatar)): ?>
-                    <img src="<?php echo htmlspecialchars($student_avatar); ?>" alt="">
+                    <img src="<?php echo htmlspecialchars($student_avatar); ?>" alt="" loading="lazy" decoding="async" onerror="this.remove()">
                 <?php else: ?>
                     <?php echo htmlspecialchars(strtoupper(substr($first_name, 0, 1))); ?>
                 <?php endif; ?>
@@ -172,7 +172,7 @@ endforeach;
                         <span class="cover">
                             <?php echo icon('book', 18); ?>
                             <?php if (!empty($book['cover_url'])): ?>
-                                <img src="<?php echo htmlspecialchars($book['cover_url']); ?>" alt="" onerror="this.remove()">
+                                <img src="<?php echo htmlspecialchars($book['cover_url']); ?>" alt="" loading="lazy" decoding="async" onerror="this.remove()">
                             <?php endif; ?>
                         </span>
                         <div class="info">

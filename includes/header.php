@@ -64,7 +64,7 @@ $nav_items = [
                 <a class="user-chip" href="profile.php" title="My profile">
                     <span class="avatar">
                         <?php if ($nav_avatar): ?>
-                            <img src="<?php echo htmlspecialchars($nav_avatar); ?>" alt="">
+                            <img src="<?php echo htmlspecialchars($nav_avatar); ?>" alt="" loading="lazy" decoding="async" onerror="this.remove()">
                         <?php else: ?>
                             <?php echo htmlspecialchars(strtoupper(substr($_SESSION['username'], 0, 1))); ?>
                         <?php endif; ?>

@@ -154,7 +154,7 @@ foreach (['success_message' => ['alert-success', 'check-circle'], 'error_message
         <div class="profile-avatar">
             <span class="avatar avatar-xl">
                 <?php if (!empty($member['avatar_url'])): ?>
-                    <img src="<?php echo htmlspecialchars($member['avatar_url']); ?>" alt="">
+                    <img src="<?php echo htmlspecialchars($member['avatar_url']); ?>" alt="" loading="lazy" decoding="async" onerror="this.remove()">
                 <?php else: ?>
                     <?php echo htmlspecialchars(strtoupper(substr($member['name'], 0, 1))); ?>
                 <?php endif; ?>

@@ -384,7 +384,7 @@ if ($db_error) {
                             <div style="display: flex; align-items: center; gap: 10px;">
                                 <span class="avatar" style="width: 32px; height: 32px; font-size: 0.8rem;">
                                     <?php if (!empty($m['avatar_url'])): ?>
-                                        <img src="<?php echo htmlspecialchars($m['avatar_url']); ?>" alt="" onerror="this.remove()">
+                                        <img src="<?php echo htmlspecialchars($m['avatar_url']); ?>" alt="" loading="lazy" decoding="async" onerror="this.remove()">
                                     <?php endif; ?>
                                     <?php echo empty($m['avatar_url']) ? htmlspecialchars(strtoupper(substr($m['name'], 0, 1))) : ''; ?>
                                 </span>

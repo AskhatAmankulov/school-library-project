@@ -78,6 +78,21 @@ def reset_database():
         conn.close()
 
 
+async def local_only(ctx):
+    """Refuse requests to other websites (web fonts, book covers hosted elsewhere).
+
+    The tests check this site, not the speed of someone else's server: a slow
+    cover host on the internet must not make a test fail.
+    """
+    async def route(r):
+        if r.request.url.startswith(BASE_URL):
+            await r.continue_()
+        else:
+            await r.abort()
+    await ctx.route("**/*", route)
+    return ctx
+
+
 def annotate(title, message):
     """On GitHub Actions, show a failure as an annotation on the run page."""
     if os.environ.get("GITHUB_ACTIONS"):

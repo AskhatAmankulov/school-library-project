@@ -67,7 +67,7 @@ $logged_in = isset($_SESSION['user_id']);
                         <span class="cover">
                             <?php echo icon('book', 18); ?>
                             <?php if (!empty($b['cover_url'])): ?>
-                                <img src="<?php echo htmlspecialchars($b['cover_url']); ?>" alt="" onerror="this.remove()">
+                                <img src="<?php echo htmlspecialchars($b['cover_url']); ?>" alt="" loading="lazy" decoding="async" onerror="this.remove()">
                             <?php endif; ?>
                         </span>
                         <div class="info">

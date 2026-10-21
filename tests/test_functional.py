@@ -13,7 +13,7 @@ import sys
 
 from playwright.async_api import async_playwright
 
-from helpers import BASE_URL as B, PROJECT, TMP, Results, q, qi, reset_database
+from helpers import BASE_URL as B, PROJECT, TMP, Results, local_only, q, qi, reset_database
 
 R = Results("Functional tests")
 check = R.check
@@ -22,6 +22,7 @@ js_errors = R.js_errors
 
 async def new_page(br, creds=None, mobile=False):
     ctx = await br.new_context(viewport={"width": 390, "height": 844} if mobile else {"width": 1366, "height": 900})
+    await local_only(ctx)
     pg = await ctx.new_page()
     pg.on("pageerror", lambda e: js_errors.append(str(e)))
     pg.on("dialog", lambda d: asyncio.ensure_future(d.accept()))

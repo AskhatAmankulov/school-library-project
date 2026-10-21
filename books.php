@@ -497,7 +497,7 @@ function viewBookInfo(bookId) {
             }
             const avail = parseInt(book.available_quantity);
             const cover = '<div class="detail-cover">' + ICON_BOOK
-                + (book.cover_url ? '<img src="' + esc(book.cover_url) + '" alt="" onerror="this.remove()">' : '') + '</div>';
+                + (book.cover_url ? '<img src="' + esc(book.cover_url) + '" alt="" decoding="async" onerror="this.remove()">' : '') + '</div>';
 
             let html = '<div class="detail">' + cover + '<div class="detail-info">';
             html += '<p class="detail-author">' + esc(book.author) + '</p>';

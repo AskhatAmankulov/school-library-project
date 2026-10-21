@@ -13,7 +13,7 @@ Problems collected:
 import asyncio, json, re, sys
 from playwright.async_api import async_playwright
 
-from helpers import BASE_URL as B, annotate, reset_database
+from helpers import BASE_URL as B, annotate, local_only, reset_database
 ROLES = {
     "guest": None,
     "user": ("user", "user123"),
@@ -113,6 +113,7 @@ async def main():
         summary = {}
         for role, creds in ROLES.items():
             ctx = await br.new_context(viewport={"width": 1366, "height": 900})
+            await local_only(ctx)
             page = await ctx.new_page()
             current = {"p": "-"}
             hook(page, role, current)
